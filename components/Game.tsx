@@ -29,12 +29,19 @@ import {
   playDraw,
   playHint,
   playLose,
+  playRing,
   playStone,
   playWin,
   setMuted,
 } from "@/lib/sound";
+import {
+  type CallPayload,
+  notifyIncomingCall,
+  subscribeToMyCalls,
+} from "@/lib/call";
 import BoardView from "./Board";
 import Fireworks from "./Fireworks";
+import IncomingCallToast from "./IncomingCallToast";
 
 const ID_KEY = "omok:playerId";
 
@@ -87,6 +94,7 @@ export default function Game({ roomId }: Props) {
   const [gameStartAt, setGameStartAt] = useState<number | null>(null);
   const [now, setNow] = useState<number>(Date.now());
   const [showFireworks, setShowFireworks] = useState(false);
+  const [incomingCall, setIncomingCall] = useState<CallPayload | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const movesRef = useRef<Move[]>([]);
   const recordedKeyRef = useRef<string | null>(null);
@@ -95,6 +103,16 @@ export default function Game({ roomId }: Props) {
   useEffect(() => {
     setMutedState(isMuted());
   }, []);
+
+  // Subscribe to incoming calls for current profile
+  useEffect(() => {
+    if (!profile) return;
+    return subscribeToMyCalls(profile.id, (call) => {
+      setIncomingCall(call);
+      playRing();
+      notifyIncomingCall(call);
+    });
+  }, [profile?.id]);
 
   // Tick clock every second while playing
   useEffect(() => {
@@ -532,6 +550,10 @@ export default function Game({ roomId }: Props) {
   return (
     <main style={pageStyle}>
       <Fireworks active={showFireworks} />
+      <IncomingCallToast
+        call={incomingCall}
+        onDismiss={() => setIncomingCall(null)}
+      />
       <div style={{ width: "100%", maxWidth: 560, marginBottom: 8 }}>
         <div
           style={{

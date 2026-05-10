@@ -21,7 +21,16 @@ import {
   type Profile,
   setCurrentProfileId,
 } from "@/lib/profile";
+import {
+  type CallPayload,
+  notifyIncomingCall,
+  requestNotifyPermission,
+  ringPerson,
+  subscribeToMyCalls,
+} from "@/lib/call";
+import { playRing } from "@/lib/sound";
 import InstallPrompt from "./InstallPrompt";
+import IncomingCallToast from "./IncomingCallToast";
 
 export default function Lobby() {
   const router = useRouter();
@@ -37,6 +46,10 @@ export default function Lobby() {
   const [lobbyConnected, setLobbyConnected] = useState(false);
 
   const [cloudProfiles, setCloudProfiles] = useState<CloudProfile[]>([]);
+  const [incomingCall, setIncomingCall] = useState<CallPayload | null>(null);
+  const [recentlyCalled, setRecentlyCalled] = useState<Record<string, number>>(
+    {},
+  );
 
   // Initial profile load + migration from legacy "omok:name"
   useEffect(() => {
@@ -45,6 +58,16 @@ export default function Lobby() {
     setProfiles(getProfiles());
     setHydrated(true);
   }, []);
+
+  // Subscribe to incoming calls for current profile
+  useEffect(() => {
+    if (!current) return;
+    return subscribeToMyCalls(current.id, (call) => {
+      setIncomingCall(call);
+      playRing();
+      notifyIncomingCall(call);
+    });
+  }, [current?.id]);
 
   // Cloud ranking: fetch + realtime subscribe
   useEffect(() => {
@@ -159,6 +182,24 @@ export default function Lobby() {
   const handleJoinRoom = (roomId: string) => {
     if (!current) return;
     router.push(`/play/${roomId}`);
+  };
+
+  const handleCall = async (target: { id: string; name: string }) => {
+    if (!current) return;
+    requestNotifyPermission();
+    setRecentlyCalled((m) => ({ ...m, [target.id]: Date.now() }));
+    setTimeout(() => {
+      setRecentlyCalled((m) => {
+        const next = { ...m };
+        delete next[target.id];
+        return next;
+      });
+    }, 2500);
+    try {
+      await ringPerson(target.id, { id: current.id, name: current.name });
+    } catch {
+      /* ignore */
+    }
   };
 
   const handleDeleteRoom = async (roomId: string) => {
@@ -298,12 +339,19 @@ export default function Lobby() {
               cloudProfiles={cloudProfiles}
               localIds={profiles.map((p) => p.id)}
               currentId={current.id}
+              recentlyCalled={recentlyCalled}
+              onCall={handleCall}
             />
 
             <InstallPrompt />
           </>
         )}
       </div>
+
+      <IncomingCallToast
+        call={incomingCall}
+        onDismiss={() => setIncomingCall(null)}
+      />
 
       {showPicker && (
         <ProfilePicker
@@ -766,10 +814,14 @@ function Ranking({
   cloudProfiles,
   localIds,
   currentId,
+  recentlyCalled,
+  onCall,
 }: {
   cloudProfiles: CloudProfile[];
   localIds: string[];
   currentId: string;
+  recentlyCalled: Record<string, number>;
+  onCall: (target: { id: string; name: string }) => void;
 }) {
   const ranked = useMemo(() => {
     const localSet = new Set(localIds);
@@ -826,6 +878,13 @@ function Ranking({
               total={r.total}
               rate={r.rate}
               isMe={r.profile.id === currentId}
+              called={!!recentlyCalled[r.profile.id]}
+              onCall={
+                r.profile.id === currentId
+                  ? undefined
+                  : () =>
+                      onCall({ id: r.profile.id, name: r.profile.name })
+              }
             />
           ))}
         </div>
@@ -840,12 +899,16 @@ function RankingRow({
   total,
   rate,
   isMe,
+  called,
+  onCall,
 }: {
   rank: number;
   profile: Profile;
   total: number;
   rate: number;
   isMe: boolean;
+  called: boolean;
+  onCall?: () => void;
 }) {
   const medal = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : null;
   const rankColor =
@@ -930,7 +993,7 @@ function RankingRow({
         style={{
           textAlign: "right",
           flexShrink: 0,
-          minWidth: 52,
+          minWidth: 46,
         }}
       >
         <div
@@ -953,6 +1016,36 @@ function RankingRow({
           승률
         </div>
       </div>
+      {onCall && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!called) onCall();
+          }}
+          aria-label={`${profile.name} 호출`}
+          title={called ? "호출 보냄" : "호출하기"}
+          disabled={called}
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 4,
+            background: called ? "#1a2040" : "#5ec5ff",
+            color: called ? "#5ec5ff" : "#0a0d18",
+            border: `2px solid ${called ? "#5ec5ff" : "#0a0d18"}`,
+            boxShadow: "3px 3px 0 #050710",
+            fontSize: 14,
+            fontWeight: 800,
+            cursor: called ? "default" : "pointer",
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            transition: "background 0.15s",
+          }}
+        >
+          {called ? "✓" : "📞"}
+        </button>
+      )}
     </div>
   );
 }

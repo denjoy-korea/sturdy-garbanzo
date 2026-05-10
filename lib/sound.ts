@@ -186,3 +186,12 @@ export function playHint() {
 export function playClick() {
   beep(660, 0.04, "square", 0.04);
 }
+
+export function playRing() {
+  if (isMuted()) return;
+  // Two short chime pairs, like a phone ring
+  beep(880, 0.16, "sine", 0.1, 0);
+  beep(660, 0.16, "sine", 0.1, 0.18);
+  beep(880, 0.16, "sine", 0.1, 0.5);
+  beep(660, 0.22, "sine", 0.1, 0.68);
+}
