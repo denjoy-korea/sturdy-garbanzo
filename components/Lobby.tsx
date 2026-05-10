@@ -15,7 +15,6 @@ const NAME_KEY = "omok:name";
 export default function Lobby() {
   const router = useRouter();
   const [name, setName] = useState("");
-  const [joinCode, setJoinCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [lobbyConnected, setLobbyConnected] = useState(false);
@@ -99,18 +98,6 @@ export default function Lobby() {
     router.push(`/play/${code}`);
   };
 
-  const handleJoinCode = () => {
-    const trimmed = validateName();
-    if (!trimmed) return;
-    const code = joinCode.trim().toUpperCase();
-    if (!/^[A-Z0-9]{4,8}$/.test(code)) {
-      setError("올바른 방 코드를 입력해주세요.");
-      return;
-    }
-    persistName(trimmed);
-    router.push(`/play/${code}`);
-  };
-
   const handleJoinRoom = (roomId: string) => {
     const trimmed = validateName();
     if (!trimmed) return;
@@ -175,53 +162,10 @@ export default function Lobby() {
               ...buttonStyle,
               background: "#3b82f6",
               color: "#fff",
-              marginBottom: 16,
             }}
           >
             새 방 만들기
           </button>
-
-          <details style={{ marginTop: 4 }}>
-            <summary
-              style={{
-                cursor: "pointer",
-                fontSize: 13,
-                color: "#a0a0a0",
-                marginBottom: 8,
-              }}
-            >
-              방 코드 직접 입력
-            </summary>
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <input
-                value={joinCode}
-                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                placeholder="ABC234"
-                maxLength={8}
-                style={{
-                  ...inputStyle,
-                  letterSpacing: 4,
-                  textAlign: "center",
-                  flex: 1,
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleJoinCode();
-                }}
-              />
-              <button
-                onClick={handleJoinCode}
-                style={{
-                  ...buttonStyle,
-                  background: "#404040",
-                  color: "#fff",
-                  width: "auto",
-                  padding: "12px 18px",
-                }}
-              >
-                입장
-              </button>
-            </div>
-          </details>
 
           {error && (
             <p style={{ color: "#f87171", marginTop: 16, fontSize: 14 }}>
