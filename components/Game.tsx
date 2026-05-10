@@ -532,13 +532,13 @@ export default function Game({ roomId }: Props) {
   return (
     <main style={pageStyle}>
       <Fireworks active={showFireworks} />
-      <div style={{ width: "100%", maxWidth: 560, marginBottom: 16 }}>
+      <div style={{ width: "100%", maxWidth: 560, marginBottom: 8 }}>
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            marginBottom: 12,
+            marginBottom: 8,
           }}
         >
           <button onClick={handleLeave} style={pixelBtnStyle}>
@@ -562,8 +562,8 @@ export default function Game({ roomId }: Props) {
           style={{
             display: "grid",
             gridTemplateColumns: "1fr 1fr",
-            gap: 12,
-            marginBottom: 12,
+            gap: 8,
+            marginBottom: 8,
           }}
         >
           <PlayerCard
@@ -593,36 +593,11 @@ export default function Game({ roomId }: Props) {
           myStone={myStone}
           turnStone={turnStone}
           opponent={opponent}
+          moveCount={moves.length}
+          elapsedMs={
+            gameStartAt ? Math.max(0, now - gameStartAt) : 0
+          }
         />
-
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginTop: 8,
-            padding: "0 4px",
-            fontSize: 11,
-            letterSpacing: 1,
-            color: "#7a83a8",
-          }}
-        >
-          <span>
-            수 <span style={{ color: "#e8e8e8", fontWeight: 700 }}>{moves.length}</span>
-          </span>
-          <span>
-            시간{" "}
-            <span style={{ color: "#5ec5ff", fontWeight: 700 }}>
-              {formatElapsed(
-                gameStartAt && status.kind !== "ended"
-                  ? now - gameStartAt
-                  : gameStartAt
-                  ? Math.max(0, now - gameStartAt)
-                  : 0,
-              )}
-            </span>
-          </span>
-        </div>
       </div>
 
       <BoardView
@@ -639,10 +614,10 @@ export default function Game({ roomId }: Props) {
       {myStone !== null && status.kind === "playing" && (
         <div
           style={{
-            marginTop: 18,
+            marginTop: 10,
             display: "flex",
             flexWrap: "wrap",
-            gap: 10,
+            gap: 8,
             justifyContent: "center",
             alignItems: "stretch",
           }}
@@ -964,11 +939,15 @@ function StatusBanner({
   myStone,
   turnStone,
   opponent,
+  moveCount,
+  elapsedMs,
 }: {
   status: Status;
   myStone: Stone | null;
   turnStone: Stone;
   opponent: PresenceMeta | null;
+  moveCount: number;
+  elapsedMs: number;
 }) {
   let text = "";
   let color = "#7a83a8";
@@ -1012,17 +991,46 @@ function StatusBanner({
         background: "#0e1226",
         border: `2px solid ${color}`,
         borderRadius: 4,
-        padding: "10px 14px",
-        fontSize: 14,
-        color,
-        textAlign: "center",
-        fontWeight: 700,
-        letterSpacing: 1,
+        padding: "8px 12px",
         boxShadow: "3px 3px 0 #050710",
-        animation: blink ? "blink 1.1s steps(2) infinite" : undefined,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 10,
       }}
     >
-      {text}
+      <div
+        style={{
+          fontSize: 13,
+          color,
+          fontWeight: 700,
+          letterSpacing: 1,
+          flex: 1,
+          textAlign: "center",
+          animation: blink ? "blink 1.1s steps(2) infinite" : undefined,
+        }}
+      >
+        {text}
+      </div>
+      <div
+        style={{
+          fontSize: 10,
+          color: "#7a83a8",
+          letterSpacing: 1,
+          textAlign: "right",
+          flexShrink: 0,
+          fontFeatureSettings: "tnum",
+        }}
+      >
+        <div>
+          수 <span style={{ color: "#e8e8e8", fontWeight: 700 }}>{moveCount}</span>
+        </div>
+        <div>
+          <span style={{ color: "#5ec5ff", fontWeight: 700 }}>
+            {formatElapsed(elapsedMs)}
+          </span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1032,7 +1040,7 @@ const pageStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   alignItems: "center",
-  padding: "24px 16px",
+  padding: "12px 8px 16px",
 };
 
 const cardStyle: React.CSSProperties = {

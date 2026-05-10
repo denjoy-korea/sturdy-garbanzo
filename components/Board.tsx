@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BOARD_SIZE, type Board, type Stone } from "@/lib/omok";
 
 interface Props {
@@ -14,6 +14,21 @@ interface Props {
   onPlace: (row: number, col: number) => void;
 }
 
+const LABEL = 12;
+const MIN_CELL = 18;
+const MAX_CELL = 34;
+// Total non-grid horizontal space: border(4*2) + padding(8*2) + label = 8 + 16 + LABEL
+const CHROME_X = 8 + 16 + LABEL;
+
+function computeCell(): number {
+  if (typeof window === "undefined") return 28;
+  const vw = window.innerWidth;
+  // Page padding on Game page is ~24px sides total
+  const pageInner = Math.min(vw - 16, 560);
+  const cell = Math.floor((pageInner - CHROME_X) / BOARD_SIZE);
+  return Math.max(MIN_CELL, Math.min(MAX_CELL, cell));
+}
+
 export default function BoardView({
   board,
   lastMove,
@@ -25,6 +40,20 @@ export default function BoardView({
   onPlace,
 }: Props) {
   const [hover, setHover] = useState<{ row: number; col: number } | null>(null);
+  const [cell, setCell] = useState<number>(28);
+
+  useEffect(() => {
+    const update = () => setCell(computeCell());
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, []);
+
+  const stone = Math.round(cell * 0.86);
   const winSet = new Set(
     (winningLine ?? []).map(([r, c]) => `${r},${c}`),
   );
@@ -38,26 +67,25 @@ export default function BoardView({
       style={{
         display: "inline-flex",
         flexDirection: "column",
-        gap: 4,
+        gap: 2,
         background: "#dcb16a",
-        padding: "10px 14px 14px",
+        padding: "6px 8px 8px",
         borderRadius: 4,
         border: "4px solid #050710",
         boxShadow:
-          "0 0 0 2px #4a5170, 6px 6px 0 #050710, 0 0 24px rgba(255,216,61,0.08)",
+          "0 0 0 2px #4a5170, 4px 4px 0 #050710, 0 0 24px rgba(255,216,61,0.08)",
       }}
     >
       {/* Column labels (top) */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: `${LABEL}px repeat(${BOARD_SIZE}, ${CELL}px)`,
+          gridTemplateColumns: `${LABEL}px repeat(${BOARD_SIZE}, ${cell}px)`,
           gap: 0,
-          marginLeft: -CELL / 2,
-          fontSize: 10,
+          fontSize: 9,
           color: "#5a3818",
           fontWeight: 700,
-          letterSpacing: 0,
+          marginLeft: -cell / 2,
           paddingLeft: LABEL,
         }}
       >
@@ -65,9 +93,9 @@ export default function BoardView({
           <div
             key={`col-${i}`}
             style={{
-              width: CELL,
+              width: cell,
               textAlign: "center",
-              transform: `translateX(${CELL / 2}px)`,
+              transform: `translateX(${cell / 2}px)`,
             }}
           >
             {COLS[i]}
@@ -88,22 +116,21 @@ export default function BoardView({
             display: "flex",
             flexDirection: "column",
             width: LABEL,
-            fontSize: 10,
+            fontSize: 9,
             color: "#5a3818",
             fontWeight: 700,
-            paddingTop: 0,
           }}
         >
           {Array.from({ length: BOARD_SIZE }).map((_, i) => (
             <div
               key={`row-${i}`}
               style={{
-                height: CELL,
+                height: cell,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "flex-end",
-                paddingRight: 4,
-                transform: `translateY(${-CELL / 2}px)`,
+                paddingRight: 3,
+                transform: `translateY(${-cell / 2}px)`,
               }}
             >
               {i + 1}
@@ -115,9 +142,9 @@ export default function BoardView({
         <div
           style={{
             position: "relative",
-            width: CELL * (BOARD_SIZE - 1),
-            height: CELL * (BOARD_SIZE - 1),
-            margin: `${CELL / 2}px ${CELL / 2}px`,
+            width: cell * (BOARD_SIZE - 1),
+            height: cell * (BOARD_SIZE - 1),
+            margin: `${cell / 2}px ${cell / 2}px`,
           }}
         >
           {/* grid lines */}
@@ -127,7 +154,7 @@ export default function BoardView({
               style={{
                 position: "absolute",
                 left: 0,
-                top: i * CELL,
+                top: i * cell,
                 width: "100%",
                 height: 1,
                 background: "#3b2a13",
@@ -140,7 +167,7 @@ export default function BoardView({
               style={{
                 position: "absolute",
                 top: 0,
-                left: i * CELL,
+                left: i * cell,
                 height: "100%",
                 width: 1,
                 background: "#3b2a13",
@@ -153,10 +180,10 @@ export default function BoardView({
               key={`s-${r}-${c}`}
               style={{
                 position: "absolute",
-                left: c * CELL - 4,
-                top: r * CELL - 4,
-                width: 8,
-                height: 8,
+                left: c * cell - 3,
+                top: r * cell - 3,
+                width: 6,
+                height: 6,
                 borderRadius: "50%",
                 background: "#3b2a13",
               }}
@@ -164,15 +191,17 @@ export default function BoardView({
           ))}
           {/* clickable intersections */}
           {board.map((row, r) =>
-            row.map((cell, c) => {
-              const empty = cell === null;
+            row.map((boardCell, c) => {
+              const empty = boardCell === null;
               const canPlaceHere = canPlaceAnywhere && empty;
               return (
                 <button
                   key={`${r}-${c}`}
                   aria-label={`${COLS[c]}${r + 1}`}
                   onClick={() => canPlaceHere && onPlace(r, c)}
-                  onMouseEnter={() => canPlaceHere && setHover({ row: r, col: c })}
+                  onMouseEnter={() =>
+                    canPlaceHere && setHover({ row: r, col: c })
+                  }
                   onMouseLeave={() =>
                     setHover((h) =>
                       h && h.row === r && h.col === c ? null : h,
@@ -181,10 +210,10 @@ export default function BoardView({
                   disabled={!canPlaceHere}
                   style={{
                     position: "absolute",
-                    left: c * CELL - CELL / 2,
-                    top: r * CELL - CELL / 2,
-                    width: CELL,
-                    height: CELL,
+                    left: c * cell - cell / 2,
+                    top: r * cell - cell / 2,
+                    width: cell,
+                    height: cell,
                     cursor: canPlaceHere ? "pointer" : "default",
                     background: "transparent",
                     padding: 0,
@@ -203,10 +232,10 @@ export default function BoardView({
                 aria-hidden
                 style={{
                   position: "absolute",
-                  left: hover.col * CELL - STONE / 2,
-                  top: hover.row * CELL - STONE / 2,
-                  width: STONE,
-                  height: STONE,
+                  left: hover.col * cell - stone / 2,
+                  top: hover.row * cell - stone / 2,
+                  width: stone,
+                  height: stone,
                   borderRadius: "50%",
                   background:
                     myStone === "black"
@@ -224,10 +253,10 @@ export default function BoardView({
               aria-hidden
               style={{
                 position: "absolute",
-                left: hint.col * CELL - STONE / 2,
-                top: hint.row * CELL - STONE / 2,
-                width: STONE,
-                height: STONE,
+                left: hint.col * cell - stone / 2,
+                top: hint.row * cell - stone / 2,
+                width: stone,
+                height: stone,
                 borderRadius: "50%",
                 border: "3px dashed #fbbf24",
                 boxShadow: "0 0 12px rgba(251, 191, 36, 0.7)",
@@ -254,8 +283,8 @@ export default function BoardView({
           `}</style>
           {/* stones */}
           {board.map((row, r) =>
-            row.map((cell, c) => {
-              if (!cell) return null;
+            row.map((boardCell, c) => {
+              if (!boardCell) return null;
               const key = `${r},${c}`;
               const isLast = lastKey === key;
               const isWin = winSet.has(key);
@@ -264,13 +293,13 @@ export default function BoardView({
                   key={`stone-${r}-${c}`}
                   style={{
                     position: "absolute",
-                    left: c * CELL - STONE / 2,
-                    top: r * CELL - STONE / 2,
-                    width: STONE,
-                    height: STONE,
+                    left: c * cell - stone / 2,
+                    top: r * cell - stone / 2,
+                    width: stone,
+                    height: stone,
                     borderRadius: "50%",
                     background:
-                      cell === "black"
+                      boardCell === "black"
                         ? "radial-gradient(circle at 30% 30%, #555, #000)"
                         : "radial-gradient(circle at 30% 30%, #fff, #c0c0c0)",
                     boxShadow: isWin
@@ -295,8 +324,8 @@ export default function BoardView({
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        color: cell === "black" ? "#5ec5ff" : "#3b82f6",
-                        fontSize: 12,
+                        color: boardCell === "black" ? "#5ec5ff" : "#3b82f6",
+                        fontSize: Math.max(8, Math.round(stone * 0.4)),
                         fontWeight: 800,
                         pointerEvents: "none",
                       }}
@@ -314,9 +343,6 @@ export default function BoardView({
   );
 }
 
-const CELL = 32;
-const STONE = 28;
-const LABEL = 14;
 const STAR_POINTS: Array<[number, number]> = [
   [3, 3],
   [3, 11],
