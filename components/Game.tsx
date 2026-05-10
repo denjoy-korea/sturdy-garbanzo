@@ -37,7 +37,12 @@ type Status =
   | { kind: "connecting" }
   | { kind: "waiting" }
   | { kind: "playing" }
-  | { kind: "ended"; reason: "win" | "draw"; winner?: Stone };
+  | {
+      kind: "ended";
+      reason: "win" | "draw";
+      winner?: Stone;
+      byForfeit?: boolean;
+    };
 
 interface Props {
   roomId: string;
@@ -166,6 +171,21 @@ export default function Game({ roomId }: Props) {
       router.push("/");
     });
 
+    channel.on("broadcast", { event: "forfeit" }, ({ payload }) => {
+      const { forfeiterId, winnerStone } = (payload ?? {}) as {
+        forfeiterId?: string;
+        winnerStone?: Stone;
+      };
+      if (!forfeiterId || !winnerStone) return;
+      if (forfeiterId === me.id) return;
+      setStatus({
+        kind: "ended",
+        reason: "win",
+        winner: winnerStone,
+        byForfeit: true,
+      });
+    });
+
     channel.subscribe(async (state) => {
       if (state !== "SUBSCRIBED") return;
       await channel.track({
@@ -274,6 +294,38 @@ export default function Game({ roomId }: Props) {
     return players.find((p) => p.playerId !== me.id) ?? null;
   }, [me, players]);
 
+  const handleLeave = async () => {
+    const ch = channelRef.current;
+    const opp = me ? players.find((p) => p.playerId !== me.id) : null;
+    const isActiveGame =
+      status.kind === "playing" && myStone !== null && opp != null && me != null;
+
+    if (isActiveGame && me && myStone) {
+      const ok = window.confirm(
+        "게임이 진행 중입니다.\n나가시면 패로 기록됩니다.\n정말 나가시겠어요?",
+      );
+      if (!ok) return;
+      const winnerStone: Stone = myStone === "black" ? "white" : "black";
+      if (profile) {
+        const updated = recordResult(profile.id, "loss");
+        if (updated) setProfile(updated);
+      }
+      recordedKeyRef.current = `forfeit:${me.id}`;
+      if (ch) {
+        try {
+          await ch.send({
+            type: "broadcast",
+            event: "forfeit",
+            payload: { forfeiterId: me.id, winnerStone },
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    router.push("/");
+  };
+
   const handlePlace = (row: number, col: number) => {
     if (!me || !myStone || !myTurn) return;
     const channel = channelRef.current;
@@ -364,7 +416,7 @@ export default function Game({ roomId }: Props) {
             marginBottom: 12,
           }}
         >
-          <button onClick={() => router.push("/")} style={pixelBtnStyle}>
+          <button onClick={handleLeave} style={pixelBtnStyle}>
             ← 나가기
           </button>
           <div
@@ -664,10 +716,10 @@ function StatusBanner({
     if (status.reason === "draw") {
       text = "DRAW · 무승부";
     } else if (status.winner === myStone) {
-      text = "♛ WIN · 승리 ♛";
+      text = status.byForfeit ? "♛ 상대 기권! 승리 ♛" : "♛ WIN · 승리 ♛";
       color = "#4ade80";
     } else if (myStone === null) {
-      text = `${status.winner === "black" ? "흑" : "백"} 승리`;
+      text = `${status.winner === "black" ? "흑" : "백"} 승리${status.byForfeit ? " (기권)" : ""}`;
     } else {
       text = "GAME OVER · 패배";
       color = "#ff5277";

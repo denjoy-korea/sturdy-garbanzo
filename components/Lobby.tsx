@@ -264,6 +264,8 @@ export default function Lobby() {
               )}
             </div>
 
+            <Ranking profiles={profiles} currentId={current.id} />
+
             <InstallPrompt />
           </>
         )}
@@ -720,6 +722,180 @@ function ProfilePicker({
             </button>
           </div>
           {error && <p style={errorStyle}>{error}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Ranking({
+  profiles,
+  currentId,
+}: {
+  profiles: Profile[];
+  currentId: string;
+}) {
+  const ranked = useMemo(() => {
+    const total = (p: Profile) => p.wins + p.losses + p.draws;
+    const winRate = (p: Profile) => {
+      const t = total(p);
+      return t === 0 ? -1 : p.wins / t;
+    };
+    return [...profiles]
+      .map((p) => ({ ...p, total: total(p), rate: winRate(p) }))
+      .sort((a, b) => {
+        if (b.wins !== a.wins) return b.wins - a.wins;
+        if (b.rate !== a.rate) return b.rate - a.rate;
+        if (b.total !== a.total) return b.total - a.total;
+        return a.createdAt - b.createdAt;
+      });
+  }, [profiles]);
+
+  if (ranked.length === 0) return null;
+
+  return (
+    <div style={cardStyle}>
+      <div style={roomsHeaderStyle}>
+        <h2 style={{ fontSize: 17, fontWeight: 700, color: "#ffd83d" }}>
+          🏆 랭킹
+        </h2>
+        <span style={{ fontSize: 11, color: "#7a83a8", letterSpacing: 1 }}>
+          {ranked.length}명 · 이 기기 기준
+        </span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {ranked.map((p, idx) => (
+          <RankingRow
+            key={p.id}
+            rank={idx + 1}
+            profile={p}
+            total={p.total}
+            rate={p.rate}
+            isMe={p.id === currentId}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RankingRow({
+  rank,
+  profile,
+  total,
+  rate,
+  isMe,
+}: {
+  rank: number;
+  profile: Profile;
+  total: number;
+  rate: number;
+  isMe: boolean;
+}) {
+  const medal = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : null;
+  const rankColor =
+    rank === 1
+      ? "#ffd83d"
+      : rank === 2
+      ? "#cfd6e6"
+      : rank === 3
+      ? "#d49060"
+      : "#7a83a8";
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "10px 12px",
+        background: isMe ? "#1a2040" : "#0e1226",
+        border: `2px solid ${isMe ? "#ffd83d" : "#2e3550"}`,
+        borderRadius: 4,
+      }}
+    >
+      <div
+        style={{
+          width: 32,
+          textAlign: "center",
+          fontWeight: 800,
+          fontSize: 16,
+          color: rankColor,
+          flexShrink: 0,
+        }}
+      >
+        {medal ?? `${rank}`}
+      </div>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div
+          style={{
+            fontSize: 14,
+            fontWeight: 700,
+            color: "#f0f0f0",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {profile.name}
+          {isMe && (
+            <span
+              style={{
+                marginLeft: 6,
+                fontSize: 10,
+                color: "#5ec5ff",
+                letterSpacing: 1,
+              }}
+            >
+              · 나
+            </span>
+          )}
+        </div>
+        <div
+          style={{
+            fontSize: 11,
+            color: "#7a83a8",
+            marginTop: 2,
+            letterSpacing: 0.5,
+          }}
+        >
+          <span style={{ color: "#4ade80" }}>{profile.wins}승</span>
+          {" · "}
+          <span style={{ color: "#ff5277" }}>{profile.losses}패</span>
+          {profile.draws > 0 && (
+            <>
+              {" · "}
+              <span>{profile.draws}무</span>
+            </>
+          )}
+          {" · "}
+          <span style={{ color: "#a0a0a0" }}>총 {total}판</span>
+        </div>
+      </div>
+      <div
+        style={{
+          textAlign: "right",
+          flexShrink: 0,
+          minWidth: 52,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 16,
+            fontWeight: 800,
+            color: rate < 0 ? "#5a607a" : "#ffd83d",
+            fontFeatureSettings: "tnum",
+          }}
+        >
+          {rate < 0 ? "-" : `${Math.round(rate * 100)}%`}
+        </div>
+        <div
+          style={{
+            fontSize: 9,
+            color: "#7a83a8",
+            letterSpacing: 1,
+          }}
+        >
+          승률
         </div>
       </div>
     </div>
