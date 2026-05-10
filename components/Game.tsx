@@ -1,0 +1,543 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import type { RealtimeChannel } from "@supabase/supabase-js";
+import { getSupabase } from "@/lib/supabase";
+import {
+  applyMoves,
+  checkWin,
+  generatePlayerId,
+  isBoardFull,
+  type Move,
+  nextStone,
+  type Stone,
+  type WinResult,
+} from "@/lib/omok";
+import BoardView from "./Board";
+
+const NAME_KEY = "omok:name";
+const ID_KEY = "omok:playerId";
+
+type PresenceMeta = {
+  playerId: string;
+  name: string;
+  joinedAt: number;
+};
+
+type Status =
+  | { kind: "connecting" }
+  | { kind: "waiting" }
+  | { kind: "playing" }
+  | { kind: "ended"; reason: "win" | "draw"; winner?: Stone };
+
+interface Props {
+  roomId: string;
+}
+
+export default function Game({ roomId }: Props) {
+  const router = useRouter();
+
+  const [me, setMe] = useState<{ id: string; name: string } | null>(null);
+  const [missingName, setMissingName] = useState(false);
+  const [moves, setMoves] = useState<Move[]>([]);
+  const [players, setPlayers] = useState<PresenceMeta[]>([]);
+  const [status, setStatus] = useState<Status>({ kind: "connecting" });
+  const [copied, setCopied] = useState(false);
+  const [restartRequest, setRestartRequest] = useState<string | null>(null);
+  const channelRef = useRef<RealtimeChannel | null>(null);
+  const movesRef = useRef<Move[]>([]);
+
+  // Load identity from localStorage
+  useEffect(() => {
+    let id = window.localStorage.getItem(ID_KEY);
+    if (!id) {
+      id = generatePlayerId();
+      window.localStorage.setItem(ID_KEY, id);
+    }
+    const name = window.localStorage.getItem(NAME_KEY);
+    if (!name) {
+      setMissingName(true);
+      return;
+    }
+    setMe({ id, name });
+  }, []);
+
+  // Keep movesRef in sync for handlers
+  useEffect(() => {
+    movesRef.current = moves;
+  }, [moves]);
+
+  // Subscribe to channel
+  useEffect(() => {
+    if (!me) return;
+
+    let cancelled = false;
+    const supabase = getSupabase();
+    const joinedAt = Date.now();
+    const channel = supabase.channel(`omok:${roomId}`, {
+      config: {
+        broadcast: { self: false, ack: false },
+        presence: { key: me.id },
+      },
+    });
+
+    channel.on("presence", { event: "sync" }, () => {
+      const state = channel.presenceState<PresenceMeta>();
+      const list: PresenceMeta[] = [];
+      for (const key of Object.keys(state)) {
+        const metas = state[key];
+        if (metas && metas.length > 0) {
+          list.push(metas[0]);
+        }
+      }
+      list.sort((a, b) => a.joinedAt - b.joinedAt);
+      if (!cancelled) setPlayers(list);
+    });
+
+    channel.on("broadcast", { event: "move" }, ({ payload }) => {
+      const move = payload as Move & { senderId: string };
+      const current = movesRef.current;
+      // Validate sequence
+      const expectedStone = nextStone(current);
+      if (move.stone !== expectedStone) return;
+      const board = applyMoves(current);
+      if (board[move.row]?.[move.col] !== null) return;
+      const next = [...current, { row: move.row, col: move.col, stone: move.stone }];
+      setMoves(next);
+    });
+
+    channel.on("broadcast", { event: "request_state" }, ({ payload }) => {
+      const { requesterId } = payload as { requesterId: string };
+      if (requesterId === me.id) return;
+      channel.send({
+        type: "broadcast",
+        event: "state",
+        payload: { moves: movesRef.current, to: requesterId },
+      });
+    });
+
+    channel.on("broadcast", { event: "state" }, ({ payload }) => {
+      const { moves: incoming, to } = payload as {
+        moves: Move[];
+        to: string;
+      };
+      if (to !== me.id) return;
+      // Adopt the longer history if it's longer than ours
+      if (incoming.length > movesRef.current.length) {
+        setMoves(incoming);
+      }
+    });
+
+    channel.on("broadcast", { event: "restart_request" }, ({ payload }) => {
+      const { from } = payload as { from: string };
+      if (from === me.id) return;
+      setRestartRequest(from);
+    });
+
+    channel.on("broadcast", { event: "restart_confirm" }, () => {
+      setMoves([]);
+      setStatus({ kind: "playing" });
+      setRestartRequest(null);
+    });
+
+    channel.subscribe(async (state) => {
+      if (state !== "SUBSCRIBED") return;
+      await channel.track({
+        playerId: me.id,
+        name: me.name,
+        joinedAt,
+      } satisfies PresenceMeta);
+      channel.send({
+        type: "broadcast",
+        event: "request_state",
+        payload: { requesterId: me.id },
+      });
+    });
+
+    channelRef.current = channel;
+
+    return () => {
+      cancelled = true;
+      channel.unsubscribe();
+      supabase.removeChannel(channel);
+      channelRef.current = null;
+    };
+  }, [me, roomId]);
+
+  // Update status based on game state
+  useEffect(() => {
+    if (!me) return;
+    if (players.length < 2) {
+      setStatus({ kind: "waiting" });
+      return;
+    }
+    const board = applyMoves(moves);
+    let win: WinResult | null = null;
+    if (moves.length > 0) {
+      win = checkWin(board, moves[moves.length - 1]);
+    }
+    if (win) {
+      setStatus({ kind: "ended", reason: "win", winner: win.stone });
+    } else if (isBoardFull(board)) {
+      setStatus({ kind: "ended", reason: "draw" });
+    } else {
+      setStatus({ kind: "playing" });
+    }
+  }, [moves, players, me]);
+
+  const board = useMemo(() => applyMoves(moves), [moves]);
+  const lastMove = moves.length
+    ? { row: moves[moves.length - 1].row, col: moves[moves.length - 1].col }
+    : null;
+  const winningLine = useMemo(() => {
+    if (moves.length === 0) return null;
+    const w = checkWin(board, moves[moves.length - 1]);
+    return w ? w.line : null;
+  }, [board, moves]);
+
+  const myStone: Stone | null = useMemo(() => {
+    if (!me || players.length === 0) return null;
+    const idx = players.findIndex((p) => p.playerId === me.id);
+    if (idx === 0) return "black";
+    if (idx === 1) return "white";
+    return null; // spectator
+  }, [me, players]);
+
+  const turnStone = nextStone(moves);
+  const myTurn = myStone !== null && myStone === turnStone && status.kind === "playing";
+
+  const opponent = useMemo(() => {
+    if (!me) return null;
+    return players.find((p) => p.playerId !== me.id) ?? null;
+  }, [me, players]);
+
+  const handlePlace = (row: number, col: number) => {
+    if (!me || !myStone || !myTurn) return;
+    const channel = channelRef.current;
+    if (!channel) return;
+    const move: Move = { row, col, stone: myStone };
+    setMoves((prev) => [...prev, move]);
+    channel.send({
+      type: "broadcast",
+      event: "move",
+      payload: { ...move, senderId: me.id },
+    });
+  };
+
+  const handleRestart = () => {
+    const channel = channelRef.current;
+    if (!channel || !me) return;
+    channel.send({
+      type: "broadcast",
+      event: "restart_request",
+      payload: { from: me.id },
+    });
+    setRestartRequest(me.id); // mark as pending from us
+  };
+
+  const handleAcceptRestart = () => {
+    const channel = channelRef.current;
+    if (!channel) return;
+    channel.send({
+      type: "broadcast",
+      event: "restart_confirm",
+      payload: {},
+    });
+    setMoves([]);
+    setStatus({ kind: "playing" });
+    setRestartRequest(null);
+  };
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(roomId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore
+    }
+  };
+
+  if (missingName) {
+    return (
+      <main style={pageStyle}>
+        <div style={cardStyle}>
+          <h1 style={{ fontSize: 24, marginBottom: 12 }}>닉네임이 필요합니다</h1>
+          <p style={{ color: "#a0a0a0", marginBottom: 16 }}>
+            먼저 로비에서 닉네임을 입력해주세요.
+          </p>
+          <button
+            onClick={() => router.push("/")}
+            style={{ ...btnStyle, background: "#3b82f6", color: "#fff" }}
+          >
+            로비로 가기
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  if (!me) {
+    return (
+      <main style={pageStyle}>
+        <p>불러오는 중...</p>
+      </main>
+    );
+  }
+
+  const stoneLabel = (s: Stone | null) => (s === "black" ? "흑" : s === "white" ? "백" : "관전자");
+
+  return (
+    <main style={pageStyle}>
+      <div style={{ width: "100%", maxWidth: 560, marginBottom: 16 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 12,
+          }}
+        >
+          <button
+            onClick={() => router.push("/")}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 6,
+              background: "#333",
+              color: "#ddd",
+              fontSize: 14,
+            }}
+          >
+            ← 나가기
+          </button>
+          <button
+            onClick={handleCopy}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 6,
+              background: "#333",
+              color: "#ddd",
+              fontSize: 14,
+              fontFamily: "monospace",
+              letterSpacing: 2,
+            }}
+            title="방 코드 복사"
+          >
+            방 {roomId} {copied ? "✓ 복사됨" : "📋"}
+          </button>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 12,
+            marginBottom: 12,
+          }}
+        >
+          <PlayerCard
+            label={`${stoneLabel(myStone)} (나)`}
+            name={me.name}
+            stone={myStone}
+            active={myTurn}
+          />
+          <PlayerCard
+            label={
+              opponent
+                ? `${stoneLabel(myStone === "black" ? "white" : myStone === "white" ? "black" : null)} (상대)`
+                : "상대 대기 중"
+            }
+            name={opponent?.name ?? "—"}
+            stone={
+              myStone === "black" ? "white" : myStone === "white" ? "black" : null
+            }
+            active={!myTurn && status.kind === "playing" && opponent !== null}
+          />
+        </div>
+
+        <StatusBanner
+          status={status}
+          myStone={myStone}
+          turnStone={turnStone}
+          opponent={opponent}
+        />
+      </div>
+
+      <BoardView
+        board={board}
+        lastMove={lastMove}
+        winningLine={winningLine}
+        myStone={myStone}
+        myTurn={myTurn}
+        disabled={status.kind !== "playing"}
+        onPlace={handlePlace}
+      />
+
+      {status.kind === "ended" && (
+        <div style={{ marginTop: 20, textAlign: "center" }}>
+          {restartRequest && restartRequest !== me.id ? (
+            <div>
+              <p style={{ marginBottom: 8 }}>
+                상대가 다시 두기를 요청했습니다.
+              </p>
+              <button
+                onClick={handleAcceptRestart}
+                style={{ ...btnStyle, background: "#22c55e", color: "#fff" }}
+              >
+                수락하고 다시 두기
+              </button>
+            </div>
+          ) : restartRequest === me.id ? (
+            <p style={{ color: "#a0a0a0" }}>상대 응답 대기 중...</p>
+          ) : myStone !== null ? (
+            <button
+              onClick={handleRestart}
+              style={{ ...btnStyle, background: "#3b82f6", color: "#fff" }}
+            >
+              다시 두기 요청
+            </button>
+          ) : null}
+        </div>
+      )}
+    </main>
+  );
+}
+
+function PlayerCard({
+  label,
+  name,
+  stone,
+  active,
+}: {
+  label: string;
+  name: string;
+  stone: Stone | null;
+  active: boolean;
+}) {
+  return (
+    <div
+      style={{
+        background: active ? "#1e3a5f" : "#262626",
+        border: active ? "1px solid #3b82f6" : "1px solid #333",
+        borderRadius: 10,
+        padding: "10px 12px",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+      }}
+    >
+      <div
+        style={{
+          width: 24,
+          height: 24,
+          borderRadius: "50%",
+          background:
+            stone === "black"
+              ? "radial-gradient(circle at 30% 30%, #555, #000)"
+              : stone === "white"
+              ? "radial-gradient(circle at 30% 30%, #fff, #bbb)"
+              : "#444",
+          flexShrink: 0,
+        }}
+      />
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: 11, color: "#a0a0a0" }}>{label}</div>
+        <div
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {name}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusBanner({
+  status,
+  myStone,
+  turnStone,
+  opponent,
+}: {
+  status: Status;
+  myStone: Stone | null;
+  turnStone: Stone;
+  opponent: PresenceMeta | null;
+}) {
+  let text = "";
+  let color = "#a0a0a0";
+
+  if (status.kind === "connecting") {
+    text = "연결 중...";
+  } else if (status.kind === "waiting") {
+    text = opponent
+      ? "잠시만 기다려주세요..."
+      : "방 코드를 친구에게 공유하세요. 상대를 기다리는 중...";
+  } else if (status.kind === "playing") {
+    if (myStone === null) {
+      text = `관전 중 — ${turnStone === "black" ? "흑" : "백"}의 차례`;
+    } else if (myStone === turnStone) {
+      text = "내 차례입니다";
+      color = "#3b82f6";
+    } else {
+      text = "상대 차례입니다";
+    }
+  } else if (status.kind === "ended") {
+    if (status.reason === "draw") {
+      text = "무승부입니다.";
+    } else if (status.winner === myStone) {
+      text = "🎉 승리했습니다!";
+      color = "#22c55e";
+    } else if (myStone === null) {
+      text = `${status.winner === "black" ? "흑" : "백"} 승리`;
+    } else {
+      text = "패배했습니다.";
+      color = "#f87171";
+    }
+  }
+
+  return (
+    <div
+      style={{
+        background: "#1a1a1a",
+        border: "1px solid #333",
+        borderRadius: 8,
+        padding: "10px 14px",
+        fontSize: 14,
+        color,
+        textAlign: "center",
+        fontWeight: 600,
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
+const pageStyle: React.CSSProperties = {
+  minHeight: "100vh",
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  padding: "24px 16px",
+};
+
+const cardStyle: React.CSSProperties = {
+  background: "#262626",
+  borderRadius: 12,
+  padding: 24,
+  maxWidth: 360,
+  width: "100%",
+};
+
+const btnStyle: React.CSSProperties = {
+  padding: "10px 20px",
+  borderRadius: 8,
+  fontWeight: 600,
+};
