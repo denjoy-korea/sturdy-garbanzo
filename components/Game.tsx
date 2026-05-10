@@ -9,6 +9,8 @@ import {
   checkWin,
   generatePlayerId,
   isBoardFull,
+  LOBBY_CHANNEL,
+  type LobbyPresence,
   type Move,
   nextStone,
   type Stone,
@@ -157,10 +159,25 @@ export default function Game({ roomId }: Props) {
 
     channelRef.current = channel;
 
+    // Lobby presence: announce this room to the global lobby
+    const lobbyChannel = supabase.channel(LOBBY_CHANNEL, {
+      config: { presence: { key: roomId } },
+    });
+    lobbyChannel.subscribe(async (state) => {
+      if (state !== "SUBSCRIBED") return;
+      await lobbyChannel.track({
+        roomId,
+        name: me.name,
+        joinedAt,
+      } satisfies LobbyPresence);
+    });
+
     return () => {
       cancelled = true;
       channel.unsubscribe();
       supabase.removeChannel(channel);
+      lobbyChannel.unsubscribe();
+      supabase.removeChannel(lobbyChannel);
       channelRef.current = null;
     };
   }, [me, roomId]);

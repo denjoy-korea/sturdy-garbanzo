@@ -1,4 +1,18 @@
 export const BOARD_SIZE = 15;
+export const LOBBY_CHANNEL = "omok:lobby";
+
+export interface LobbyPresence {
+  roomId: string;
+  name: string;
+  joinedAt: number;
+}
+
+export interface RoomSummary {
+  roomId: string;
+  hostName: string;
+  playerCount: number;
+  createdAt: number;
+}
 
 export type Stone = "black" | "white";
 export type Cell = Stone | null;

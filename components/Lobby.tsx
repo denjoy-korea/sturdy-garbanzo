@@ -1,8 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { generateRoomCode } from "@/lib/omok";
+import { getSupabase } from "@/lib/supabase";
+import {
+  generateRoomCode,
+  LOBBY_CHANNEL,
+  type LobbyPresence,
+  type RoomSummary,
+} from "@/lib/omok";
 
 const NAME_KEY = "omok:name";
 
@@ -11,10 +17,59 @@ export default function Lobby() {
   const [name, setName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [rooms, setRooms] = useState<RoomSummary[]>([]);
+  const [lobbyConnected, setLobbyConnected] = useState(false);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(NAME_KEY);
     if (saved) setName(saved);
+  }, []);
+
+  // Subscribe to global lobby presence to discover active rooms
+  useEffect(() => {
+    const supabase = getSupabase();
+    const channel = supabase.channel(LOBBY_CHANNEL, {
+      config: { presence: { key: "viewer" } },
+    });
+
+    const refresh = () => {
+      const state = channel.presenceState<LobbyPresence>();
+      const list: RoomSummary[] = [];
+      for (const key of Object.keys(state)) {
+        if (key === "viewer") continue;
+        const metas = state[key];
+        if (!metas || metas.length === 0) continue;
+        const sorted = [...metas].sort((a, b) => a.joinedAt - b.joinedAt);
+        const host = sorted[0];
+        if (!host?.roomId) continue;
+        list.push({
+          roomId: host.roomId,
+          hostName: host.name,
+          playerCount: metas.length,
+          createdAt: host.joinedAt,
+        });
+      }
+      list.sort((a, b) => {
+        if (a.playerCount !== b.playerCount) return a.playerCount - b.playerCount;
+        return b.createdAt - a.createdAt;
+      });
+      setRooms(list);
+    };
+
+    channel.on("presence", { event: "sync" }, refresh);
+    channel.on("presence", { event: "join" }, refresh);
+    channel.on("presence", { event: "leave" }, refresh);
+
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        setLobbyConnected(true);
+      }
+    });
+
+    return () => {
+      channel.unsubscribe();
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const persistName = (value: string) => {
@@ -44,7 +99,7 @@ export default function Lobby() {
     router.push(`/play/${code}`);
   };
 
-  const handleJoin = () => {
+  const handleJoinCode = () => {
     const trimmed = validateName();
     if (!trimmed) return;
     const code = joinCode.trim().toUpperCase();
@@ -56,12 +111,27 @@ export default function Lobby() {
     router.push(`/play/${code}`);
   };
 
+  const handleJoinRoom = (roomId: string) => {
+    const trimmed = validateName();
+    if (!trimmed) return;
+    persistName(trimmed);
+    router.push(`/play/${roomId}`);
+  };
+
+  const waitingRooms = useMemo(
+    () => rooms.filter((r) => r.playerCount < 2),
+    [rooms],
+  );
+  const playingRooms = useMemo(
+    () => rooms.filter((r) => r.playerCount >= 2),
+    [rooms],
+  );
+
   return (
     <main
       style={{
         minHeight: "100vh",
         display: "flex",
-        alignItems: "center",
         justifyContent: "center",
         padding: 24,
       }}
@@ -69,89 +139,244 @@ export default function Lobby() {
       <div
         style={{
           width: "100%",
-          maxWidth: 420,
-          background: "#262626",
-          borderRadius: 16,
-          padding: 32,
-          boxShadow: "0 12px 32px rgba(0,0,0,0.4)",
+          maxWidth: 480,
         }}
       >
-        <h1 style={{ fontSize: 32, marginBottom: 8 }}>오목</h1>
-        <p style={{ color: "#a0a0a0", marginBottom: 24 }}>
-          친구와 1:1로 즐기는 온라인 오목
-        </p>
-
-        <label style={{ display: "block", marginBottom: 16 }}>
-          <span style={{ display: "block", marginBottom: 6, fontSize: 14 }}>
-            닉네임
-          </span>
-          <input
-            value={name}
-            onChange={(e) => persistName(e.target.value)}
-            placeholder="예: 김철수"
-            maxLength={12}
-            style={inputStyle}
-          />
-        </label>
-
-        <button
-          onClick={handleCreate}
+        <div
           style={{
-            ...buttonStyle,
-            background: "#3b82f6",
-            color: "#fff",
-            marginBottom: 24,
+            background: "#262626",
+            borderRadius: 16,
+            padding: 32,
+            boxShadow: "0 12px 32px rgba(0,0,0,0.4)",
+            marginBottom: 16,
           }}
         >
-          새 방 만들기
-        </button>
+          <h1 style={{ fontSize: 32, marginBottom: 8 }}>오목</h1>
+          <p style={{ color: "#a0a0a0", marginBottom: 24 }}>
+            친구와 1:1로 즐기는 온라인 오목
+          </p>
+
+          <label style={{ display: "block", marginBottom: 16 }}>
+            <span style={{ display: "block", marginBottom: 6, fontSize: 14 }}>
+              닉네임
+            </span>
+            <input
+              value={name}
+              onChange={(e) => persistName(e.target.value)}
+              placeholder="예: 김철수"
+              maxLength={12}
+              style={inputStyle}
+            />
+          </label>
+
+          <button
+            onClick={handleCreate}
+            style={{
+              ...buttonStyle,
+              background: "#3b82f6",
+              color: "#fff",
+              marginBottom: 16,
+            }}
+          >
+            새 방 만들기
+          </button>
+
+          <details style={{ marginTop: 4 }}>
+            <summary
+              style={{
+                cursor: "pointer",
+                fontSize: 13,
+                color: "#a0a0a0",
+                marginBottom: 8,
+              }}
+            >
+              방 코드 직접 입력
+            </summary>
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <input
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                placeholder="ABC234"
+                maxLength={8}
+                style={{
+                  ...inputStyle,
+                  letterSpacing: 4,
+                  textAlign: "center",
+                  flex: 1,
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleJoinCode();
+                }}
+              />
+              <button
+                onClick={handleJoinCode}
+                style={{
+                  ...buttonStyle,
+                  background: "#404040",
+                  color: "#fff",
+                  width: "auto",
+                  padding: "12px 18px",
+                }}
+              >
+                입장
+              </button>
+            </div>
+          </details>
+
+          {error && (
+            <p style={{ color: "#f87171", marginTop: 16, fontSize: 14 }}>
+              {error}
+            </p>
+          )}
+        </div>
 
         <div
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            margin: "8px 0 16px",
+            background: "#262626",
+            borderRadius: 16,
+            padding: 24,
+            boxShadow: "0 12px 32px rgba(0,0,0,0.4)",
           }}
         >
-          <div style={{ flex: 1, height: 1, background: "#404040" }} />
-          <span style={{ fontSize: 12, color: "#808080" }}>또는</span>
-          <div style={{ flex: 1, height: 1, background: "#404040" }} />
-        </div>
-
-        <label style={{ display: "block", marginBottom: 12 }}>
-          <span style={{ display: "block", marginBottom: 6, fontSize: 14 }}>
-            방 코드로 입장
-          </span>
-          <input
-            value={joinCode}
-            onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-            placeholder="예: ABC234"
-            maxLength={8}
-            style={{ ...inputStyle, letterSpacing: 4, textAlign: "center" }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleJoin();
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: 12,
             }}
-          />
-        </label>
-        <button
-          onClick={handleJoin}
-          style={{
-            ...buttonStyle,
-            background: "#404040",
-            color: "#fff",
-          }}
-        >
-          입장
-        </button>
+          >
+            <h2 style={{ fontSize: 18, fontWeight: 600 }}>진행중인 방</h2>
+            <span
+              style={{
+                fontSize: 12,
+                color: lobbyConnected ? "#22c55e" : "#a0a0a0",
+              }}
+            >
+              {lobbyConnected
+                ? `● 실시간 (${rooms.length})`
+                : "○ 연결 중..."}
+            </span>
+          </div>
 
-        {error && (
-          <p style={{ color: "#f87171", marginTop: 16, fontSize: 14 }}>
-            {error}
-          </p>
-        )}
+          {rooms.length === 0 ? (
+            <p style={{ fontSize: 14, color: "#808080", padding: "12px 4px" }}>
+              {lobbyConnected
+                ? "현재 진행중인 방이 없습니다. 첫 방을 만들어보세요!"
+                : "잠시만 기다려주세요..."}
+            </p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {waitingRooms.length > 0 && (
+                <SectionLabel text="대기 중 (입장 가능)" />
+              )}
+              {waitingRooms.map((r) => (
+                <RoomItem
+                  key={r.roomId}
+                  room={r}
+                  onClick={() => handleJoinRoom(r.roomId)}
+                />
+              ))}
+              {playingRooms.length > 0 && (
+                <SectionLabel text="진행 중 (관전 가능)" />
+              )}
+              {playingRooms.map((r) => (
+                <RoomItem
+                  key={r.roomId}
+                  room={r}
+                  onClick={() => handleJoinRoom(r.roomId)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </main>
+  );
+}
+
+function SectionLabel({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        fontSize: 11,
+        color: "#808080",
+        textTransform: "uppercase",
+        letterSpacing: 1,
+        marginTop: 4,
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
+function RoomItem({
+  room,
+  onClick,
+}: {
+  room: RoomSummary;
+  onClick: () => void;
+}) {
+  const full = room.playerCount >= 2;
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: "#1a1a1a",
+        border: "1px solid #333",
+        borderRadius: 10,
+        padding: "12px 14px",
+        textAlign: "left",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 10,
+        cursor: "pointer",
+        transition: "background 0.15s",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "#2a2a2a";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "#1a1a1a";
+      }}
+    >
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div
+          style={{
+            fontFamily: "monospace",
+            fontSize: 16,
+            letterSpacing: 2,
+            fontWeight: 600,
+          }}
+        >
+          {room.roomId}
+        </div>
+        <div
+          style={{
+            fontSize: 12,
+            color: "#a0a0a0",
+            marginTop: 2,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          호스트: {room.hostName}
+        </div>
+      </div>
+      <div
+        style={{
+          fontSize: 12,
+          color: full ? "#a0a0a0" : "#22c55e",
+          fontWeight: 600,
+          flexShrink: 0,
+        }}
+      >
+        {full ? "관전" : "입장 →"}
+      </div>
+    </button>
   );
 }
 
