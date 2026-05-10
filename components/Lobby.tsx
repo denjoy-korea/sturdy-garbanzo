@@ -9,19 +9,35 @@ import {
   type LobbyPresence,
   type RoomSummary,
 } from "@/lib/omok";
-
-const NAME_KEY = "omok:name";
+import {
+  bootstrapProfiles,
+  createProfile,
+  deleteProfile,
+  formatRecord,
+  getProfiles,
+  type Profile,
+  setCurrentProfileId,
+} from "@/lib/profile";
 
 export default function Lobby() {
   const router = useRouter();
-  const [name, setName] = useState("");
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [current, setCurrent] = useState<Profile | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+
+  const [showPicker, setShowPicker] = useState(false);
+  const [newName, setNewName] = useState("");
   const [error, setError] = useState<string | null>(null);
+
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [lobbyConnected, setLobbyConnected] = useState(false);
 
+  // Initial profile load + migration from legacy "omok:name"
   useEffect(() => {
-    const saved = window.localStorage.getItem(NAME_KEY);
-    if (saved) setName(saved);
+    const profile = bootstrapProfiles();
+    setCurrent(profile);
+    setProfiles(getProfiles());
+    setHydrated(true);
   }, []);
 
   // Subscribe to global lobby presence to discover active rooms
@@ -60,9 +76,7 @@ export default function Lobby() {
     channel.on("presence", { event: "leave" }, refresh);
 
     channel.subscribe((status) => {
-      if (status === "SUBSCRIBED") {
-        setLobbyConnected(true);
-      }
+      if (status === "SUBSCRIBED") setLobbyConnected(true);
     });
 
     return () => {
@@ -71,37 +85,48 @@ export default function Lobby() {
     };
   }, []);
 
-  const persistName = (value: string) => {
-    setName(value);
-    window.localStorage.setItem(NAME_KEY, value);
-  };
-
-  const validateName = () => {
-    const trimmed = name.trim();
+  const handleAddProfile = () => {
+    const trimmed = newName.trim();
     if (!trimmed) {
-      setError("닉네임을 입력해주세요.");
-      return null;
+      setError("이름을 입력해주세요.");
+      return;
     }
     if (trimmed.length > 12) {
-      setError("닉네임은 12자 이하로 입력해주세요.");
-      return null;
+      setError("이름은 12자 이하로 입력해주세요.");
+      return;
     }
+    const created = createProfile(trimmed);
+    setCurrent(created);
+    setProfiles(getProfiles());
+    setNewName("");
     setError(null);
-    return trimmed;
   };
 
-  const handleCreate = () => {
-    const trimmed = validateName();
-    if (!trimmed) return;
-    persistName(trimmed);
+  const handleSelectProfile = (id: string) => {
+    setCurrentProfileId(id);
+    const next = profiles.find((p) => p.id === id) ?? null;
+    setCurrent(next);
+    setShowPicker(false);
+  };
+
+  const handleDeleteProfile = (id: string) => {
+    if (!window.confirm("이 사용자를 삭제할까요? 전적도 함께 사라집니다.")) return;
+    deleteProfile(id);
+    const updated = getProfiles();
+    setProfiles(updated);
+    if (current?.id === id) {
+      setCurrent(updated[0] ?? null);
+    }
+  };
+
+  const handleCreateRoom = () => {
+    if (!current) return;
     const code = generateRoomCode();
     router.push(`/play/${code}`);
   };
 
   const handleJoinRoom = (roomId: string) => {
-    const trimmed = validateName();
-    if (!trimmed) return;
-    persistName(trimmed);
+    if (!current) return;
     router.push(`/play/${roomId}`);
   };
 
@@ -133,7 +158,6 @@ export default function Lobby() {
       event: "close",
       payload: { reason: "방이 삭제되었습니다." },
     });
-    // Brief delay to ensure delivery before unsubscribing
     setTimeout(() => {
       ch.unsubscribe();
       supabase.removeChannel(ch);
@@ -150,129 +174,519 @@ export default function Lobby() {
   );
 
   return (
-    <main
+    <main style={pageStyle}>
+      <div style={containerStyle}>
+        <Header />
+
+        {!hydrated ? (
+          <div style={{ ...cardStyle, textAlign: "center", color: "#a0a0a0" }}>
+            불러오는 중...
+          </div>
+        ) : !current ? (
+          <FirstTimeForm
+            value={newName}
+            onChange={(v) => {
+              setNewName(v);
+              setError(null);
+            }}
+            onSubmit={handleAddProfile}
+            error={error}
+          />
+        ) : (
+          <>
+            <ProfileCard
+              profile={current}
+              onChange={() => {
+                setShowPicker(true);
+                setError(null);
+                setNewName("");
+              }}
+            />
+
+            <button onClick={handleCreateRoom} style={primaryActionStyle}>
+              <span style={{ fontSize: 22, marginRight: 8 }}>🎮</span>
+              새 방 만들기
+            </button>
+
+            <div style={cardStyle}>
+              <div style={roomsHeaderStyle}>
+                <h2 style={{ fontSize: 17, fontWeight: 700 }}>진행중인 방</h2>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: lobbyConnected ? "#22c55e" : "#a0a0a0",
+                    fontWeight: 500,
+                  }}
+                >
+                  {lobbyConnected ? `● 실시간 ${rooms.length}개` : "○ 연결 중"}
+                </span>
+              </div>
+
+              {rooms.length === 0 ? (
+                <p
+                  style={{
+                    fontSize: 14,
+                    color: "#808080",
+                    padding: "16px 4px",
+                    textAlign: "center",
+                  }}
+                >
+                  {lobbyConnected
+                    ? "현재 진행중인 방이 없어요. 첫 방을 만들어보세요!"
+                    : "잠시만 기다려주세요..."}
+                </p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {waitingRooms.length > 0 && (
+                    <SectionLabel text="대기 중 (입장 가능)" />
+                  )}
+                  {waitingRooms.map((r) => (
+                    <RoomItem
+                      key={r.roomId}
+                      room={r}
+                      onClick={() => handleJoinRoom(r.roomId)}
+                      onDelete={() => handleDeleteRoom(r.roomId)}
+                    />
+                  ))}
+                  {playingRooms.length > 0 && (
+                    <SectionLabel text="진행 중 (관전 가능)" />
+                  )}
+                  {playingRooms.map((r) => (
+                    <RoomItem
+                      key={r.roomId}
+                      room={r}
+                      onClick={() => handleJoinRoom(r.roomId)}
+                      onDelete={() => handleDeleteRoom(r.roomId)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {showPicker && (
+        <ProfilePicker
+          profiles={profiles}
+          currentId={current?.id ?? null}
+          onSelect={handleSelectProfile}
+          onDelete={handleDeleteProfile}
+          onAdd={handleAddProfile}
+          newName={newName}
+          setNewName={(v) => {
+            setNewName(v);
+            setError(null);
+          }}
+          error={error}
+          onClose={() => setShowPicker(false)}
+        />
+      )}
+    </main>
+  );
+}
+
+function Header() {
+  return (
+    <div style={{ textAlign: "center", padding: "8px 0 4px" }}>
+      <div
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 14,
+        }}
+      >
+        <BoardIcon size={56} />
+        <div style={{ textAlign: "left" }}>
+          <h1
+            style={{
+              fontSize: 36,
+              fontWeight: 800,
+              letterSpacing: -1,
+              lineHeight: 1.1,
+              background: "linear-gradient(135deg, #fbbf24, #c8954c 60%, #d97706)",
+              WebkitBackgroundClip: "text",
+              backgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              color: "transparent",
+            }}
+          >
+            뽀꼬오목
+          </h1>
+          <p style={{ fontSize: 13, color: "#a0a0a0", marginTop: 2 }}>
+            가족과 함께하는 1:1 온라인 오목
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BoardIcon({ size = 56 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      style={{ flexShrink: 0, filter: "drop-shadow(0 4px 8px rgba(0,0,0,0.4))" }}
+    >
+      <rect width="64" height="64" rx="10" fill="#d9a652" />
+      <g stroke="#4a2f12" strokeWidth="1.5" strokeLinecap="round">
+        <line x1="14" y1="14" x2="50" y2="14" />
+        <line x1="14" y1="32" x2="50" y2="32" />
+        <line x1="14" y1="50" x2="50" y2="50" />
+        <line x1="14" y1="14" x2="14" y2="50" />
+        <line x1="32" y1="14" x2="32" y2="50" />
+        <line x1="50" y1="14" x2="50" y2="50" />
+      </g>
+      <circle cx="14" cy="14" r="6" fill="url(#lb-w)" />
+      <circle cx="32" cy="32" r="9" fill="url(#lb-b)" />
+      <circle cx="50" cy="50" r="6" fill="url(#lb-b)" />
+      <defs>
+        <radialGradient id="lb-b" cx="35%" cy="35%" r="65%">
+          <stop offset="0%" stopColor="#666" />
+          <stop offset="100%" stopColor="#000" />
+        </radialGradient>
+        <radialGradient id="lb-w" cx="35%" cy="35%" r="65%">
+          <stop offset="0%" stopColor="#fff" />
+          <stop offset="100%" stopColor="#bbb" />
+        </radialGradient>
+      </defs>
+    </svg>
+  );
+}
+
+function FirstTimeForm({
+  value,
+  onChange,
+  onSubmit,
+  error,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  error: string | null;
+}) {
+  return (
+    <div style={cardStyle}>
+      <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>
+        처음이시네요! 👋
+      </h2>
+      <p style={{ fontSize: 13, color: "#a0a0a0", marginBottom: 16 }}>
+        이름을 등록하시면 다음부터는 목록에서 선택해 들어갈 수 있어요.
+      </p>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="이름 (예: 아빠, 김철수)"
+        maxLength={12}
+        autoFocus
+        style={inputStyle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onSubmit();
+        }}
+      />
+      <button
+        onClick={onSubmit}
+        style={{ ...primaryActionStyle, marginTop: 12 }}
+      >
+        등록하고 시작하기
+      </button>
+      {error && <p style={errorStyle}>{error}</p>}
+    </div>
+  );
+}
+
+function ProfileCard({
+  profile,
+  onChange,
+}: {
+  profile: Profile;
+  onChange: () => void;
+}) {
+  const total = profile.wins + profile.losses + profile.draws;
+  const winRate =
+    total > 0 ? Math.round((profile.wins / total) * 100) : null;
+  return (
+    <div
       style={{
-        minHeight: "100vh",
-        display: "flex",
-        justifyContent: "center",
-        padding: 24,
+        ...cardStyle,
+        background:
+          "linear-gradient(135deg, #2c2620 0%, #1f1a14 100%)",
+        border: "1px solid #3a342d",
       }}
     >
       <div
         style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 12, color: "#a0a0a0", marginBottom: 4 }}>
+            안녕하세요 👋
+          </div>
+          <div
+            style={{
+              fontSize: 22,
+              fontWeight: 700,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {profile.name}
+          </div>
+        </div>
+        <button
+          onClick={onChange}
+          style={{
+            padding: "8px 14px",
+            borderRadius: 8,
+            background: "#3a342d",
+            color: "#f0d8a8",
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: "pointer",
+            flexShrink: 0,
+          }}
+        >
+          변경 →
+        </button>
+      </div>
+      <div
+        style={{
+          display: "flex",
+          gap: 12,
+          marginTop: 14,
+          paddingTop: 14,
+          borderTop: "1px dashed #3a342d",
+        }}
+      >
+        <Stat label="승" value={profile.wins} color="#22c55e" />
+        <Stat label="패" value={profile.losses} color="#f87171" />
+        <Stat label="무" value={profile.draws} color="#a0a0a0" />
+        <Stat
+          label="승률"
+          value={winRate === null ? "-" : `${winRate}%`}
+          color="#fbbf24"
+        />
+      </div>
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: number | string;
+  color: string;
+}) {
+  return (
+    <div style={{ flex: 1, textAlign: "center" }}>
+      <div style={{ fontSize: 11, color: "#a0a0a0", marginBottom: 2 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 700, color }}>{value}</div>
+    </div>
+  );
+}
+
+function ProfilePicker({
+  profiles,
+  currentId,
+  onSelect,
+  onDelete,
+  onAdd,
+  newName,
+  setNewName,
+  error,
+  onClose,
+}: {
+  profiles: Profile[];
+  currentId: string | null;
+  onSelect: (id: string) => void;
+  onDelete: (id: string) => void;
+  onAdd: () => void;
+  newName: string;
+  setNewName: (v: string) => void;
+  error: string | null;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.6)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+        zIndex: 100,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
           width: "100%",
-          maxWidth: 480,
+          maxWidth: 420,
+          background: "#1f1a14",
+          border: "1px solid #3a342d",
+          borderRadius: 16,
+          padding: 20,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+          maxHeight: "85vh",
+          overflowY: "auto",
         }}
       >
         <div
           style={{
-            background: "#262626",
-            borderRadius: 16,
-            padding: 32,
-            boxShadow: "0 12px 32px rgba(0,0,0,0.4)",
-            marginBottom: 16,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 14,
           }}
         >
-          <h1 style={{ fontSize: 32, marginBottom: 8 }}>뽀꼬오목</h1>
-          <p style={{ color: "#a0a0a0", marginBottom: 24 }}>
-            가족과 1:1로 즐기는 온라인 뽀꼬오목
-          </p>
-
-          <label style={{ display: "block", marginBottom: 16 }}>
-            <span style={{ display: "block", marginBottom: 6, fontSize: 14 }}>
-              닉네임
-            </span>
-            <input
-              value={name}
-              onChange={(e) => persistName(e.target.value)}
-              placeholder="예: 김철수"
-              maxLength={12}
-              style={inputStyle}
-            />
-          </label>
-
+          <h3 style={{ fontSize: 17, fontWeight: 700 }}>사용자 선택</h3>
           <button
-            onClick={handleCreate}
+            onClick={onClose}
+            aria-label="닫기"
             style={{
-              ...buttonStyle,
-              background: "#3b82f6",
-              color: "#fff",
+              width: 28,
+              height: 28,
+              borderRadius: 6,
+              color: "#a0a0a0",
+              fontSize: 18,
+              cursor: "pointer",
             }}
           >
-            새 방 만들기
+            ×
           </button>
+        </div>
 
-          {error && (
-            <p style={{ color: "#f87171", marginTop: 16, fontSize: 14 }}>
-              {error}
-            </p>
-          )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {profiles.map((p) => {
+            const selected = p.id === currentId;
+            return (
+              <div
+                key={p.id}
+                onClick={() => onSelect(p.id)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  background: selected ? "#2d2a1f" : "#1a1610",
+                  border: `1px solid ${selected ? "#c8954c" : "#2a251e"}`,
+                  cursor: "pointer",
+                }}
+              >
+                <div
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: "50%",
+                    border: `2px solid ${selected ? "#c8954c" : "#3a342d"}`,
+                    background: selected ? "#c8954c" : "transparent",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 12,
+                    color: "#1a1a1a",
+                    fontWeight: 800,
+                    flexShrink: 0,
+                  }}
+                >
+                  {selected ? "✓" : ""}
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div
+                    style={{
+                      fontSize: 15,
+                      fontWeight: 600,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {p.name}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#a0a0a0", marginTop: 2 }}>
+                    {formatRecord(p)}
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(p.id);
+                  }}
+                  aria-label={`${p.name} 삭제`}
+                  title="이 사용자 삭제"
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 6,
+                    background: "#2a251e",
+                    color: "#f87171",
+                    fontSize: 16,
+                    cursor: "pointer",
+                    flexShrink: 0,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
         </div>
 
         <div
           style={{
-            background: "#262626",
-            borderRadius: 16,
-            padding: 24,
-            boxShadow: "0 12px 32px rgba(0,0,0,0.4)",
+            marginTop: 16,
+            paddingTop: 16,
+            borderTop: "1px dashed #3a342d",
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: 12,
-            }}
-          >
-            <h2 style={{ fontSize: 18, fontWeight: 600 }}>진행중인 방</h2>
-            <span
+          <div style={{ fontSize: 13, color: "#a0a0a0", marginBottom: 8 }}>
+            + 새 사람 추가
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="이름"
+              maxLength={12}
+              style={{ ...inputStyle, flex: 1 }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") onAdd();
+              }}
+            />
+            <button
+              onClick={onAdd}
               style={{
-                fontSize: 12,
-                color: lobbyConnected ? "#22c55e" : "#a0a0a0",
+                padding: "0 18px",
+                borderRadius: 8,
+                background: "#c8954c",
+                color: "#1a1a1a",
+                fontWeight: 700,
+                cursor: "pointer",
               }}
             >
-              {lobbyConnected
-                ? `● 실시간 (${rooms.length})`
-                : "○ 연결 중..."}
-            </span>
+              추가
+            </button>
           </div>
-
-          {rooms.length === 0 ? (
-            <p style={{ fontSize: 14, color: "#808080", padding: "12px 4px" }}>
-              {lobbyConnected
-                ? "현재 진행중인 방이 없습니다. 첫 방을 만들어보세요!"
-                : "잠시만 기다려주세요..."}
-            </p>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {waitingRooms.length > 0 && (
-                <SectionLabel text="대기 중 (입장 가능)" />
-              )}
-              {waitingRooms.map((r) => (
-                <RoomItem
-                  key={r.roomId}
-                  room={r}
-                  onClick={() => handleJoinRoom(r.roomId)}
-                  onDelete={() => handleDeleteRoom(r.roomId)}
-                />
-              ))}
-              {playingRooms.length > 0 && (
-                <SectionLabel text="진행 중 (관전 가능)" />
-              )}
-              {playingRooms.map((r) => (
-                <RoomItem
-                  key={r.roomId}
-                  room={r}
-                  onClick={() => handleJoinRoom(r.roomId)}
-                  onDelete={() => handleDeleteRoom(r.roomId)}
-                />
-              ))}
-            </div>
-          )}
+          {error && <p style={errorStyle}>{error}</p>}
         </div>
       </div>
-    </main>
+    </div>
   );
 }
 
@@ -306,8 +720,8 @@ function RoomItem({
     <div
       onClick={onClick}
       style={{
-        background: "#1a1a1a",
-        border: "1px solid #333",
+        background: "#1a1610",
+        border: "1px solid #2a251e",
         borderRadius: 10,
         padding: "12px 14px",
         display: "flex",
@@ -318,10 +732,10 @@ function RoomItem({
         transition: "background 0.15s",
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = "#2a2a2a";
+        e.currentTarget.style.background = "#23201a";
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.background = "#1a1a1a";
+        e.currentTarget.style.background = "#1a1610";
       }}
     >
       <div style={{ minWidth: 0, flex: 1 }}>
@@ -330,7 +744,8 @@ function RoomItem({
             fontFamily: "monospace",
             fontSize: 16,
             letterSpacing: 2,
-            fontWeight: 600,
+            fontWeight: 700,
+            color: "#f0d8a8",
           }}
         >
           {room.roomId}
@@ -360,7 +775,7 @@ function RoomItem({
           style={{
             fontSize: 12,
             color: full ? "#a0a0a0" : "#22c55e",
-            fontWeight: 600,
+            fontWeight: 700,
           }}
         >
           {full ? "관전" : "입장 →"}
@@ -376,10 +791,9 @@ function RoomItem({
             width: 28,
             height: 28,
             borderRadius: 6,
-            background: "#333",
+            background: "#2a251e",
             color: "#f87171",
             fontSize: 16,
-            lineHeight: 1,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -391,7 +805,7 @@ function RoomItem({
             e.currentTarget.style.color = "#fff";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = "#333";
+            e.currentTarget.style.background = "#2a251e";
             e.currentTarget.style.color = "#f87171";
           }}
         >
@@ -402,21 +816,66 @@ function RoomItem({
   );
 }
 
+const pageStyle: React.CSSProperties = {
+  minHeight: "100vh",
+  display: "flex",
+  justifyContent: "center",
+  padding: "32px 16px 48px",
+  background:
+    "radial-gradient(ellipse at top, #2a1f15 0%, #14100c 60%, #0a0805 100%)",
+};
+
+const containerStyle: React.CSSProperties = {
+  width: "100%",
+  maxWidth: 480,
+  display: "flex",
+  flexDirection: "column",
+  gap: 14,
+};
+
+const cardStyle: React.CSSProperties = {
+  background: "#262320",
+  border: "1px solid #34302a",
+  borderRadius: 16,
+  padding: 20,
+  boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+};
+
+const roomsHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: 12,
+};
+
 const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "12px 14px",
   fontSize: 16,
-  background: "#1a1a1a",
-  border: "1px solid #404040",
+  background: "#1a1610",
+  border: "1px solid #34302a",
   borderRadius: 8,
   color: "#f0f0f0",
   outline: "none",
 };
 
-const buttonStyle: React.CSSProperties = {
+const primaryActionStyle: React.CSSProperties = {
   width: "100%",
-  padding: "12px 14px",
-  fontSize: 16,
-  fontWeight: 600,
-  borderRadius: 8,
+  padding: "16px 18px",
+  fontSize: 17,
+  fontWeight: 700,
+  borderRadius: 12,
+  background: "linear-gradient(135deg, #e07b3e 0%, #c8954c 100%)",
+  color: "#1a1a1a",
+  cursor: "pointer",
+  boxShadow: "0 6px 20px rgba(224, 123, 62, 0.3)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+
+const errorStyle: React.CSSProperties = {
+  color: "#f87171",
+  marginTop: 10,
+  fontSize: 13,
 };

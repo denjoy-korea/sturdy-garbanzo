@@ -17,9 +17,14 @@ import {
   type WinResult,
 } from "@/lib/omok";
 import { suggestMove } from "@/lib/hint";
+import {
+  formatRecord,
+  getCurrentProfile,
+  type Profile,
+  recordResult,
+} from "@/lib/profile";
 import BoardView from "./Board";
 
-const NAME_KEY = "omok:name";
 const ID_KEY = "omok:playerId";
 
 type PresenceMeta = {
@@ -41,8 +46,13 @@ interface Props {
 export default function Game({ roomId }: Props) {
   const router = useRouter();
 
-  const [me, setMe] = useState<{ id: string; name: string } | null>(null);
-  const [missingName, setMissingName] = useState(false);
+  const [me, setMe] = useState<{
+    id: string;
+    name: string;
+    profileId: string;
+  } | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [missingProfile, setMissingProfile] = useState(false);
   const [moves, setMoves] = useState<Move[]>([]);
   const [players, setPlayers] = useState<PresenceMeta[]>([]);
   const [status, setStatus] = useState<Status>({ kind: "connecting" });
@@ -52,6 +62,7 @@ export default function Game({ roomId }: Props) {
   const [hint, setHint] = useState<{ row: number; col: number } | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const movesRef = useRef<Move[]>([]);
+  const recordedKeyRef = useRef<string | null>(null);
 
   // Load identity from localStorage
   useEffect(() => {
@@ -60,12 +71,13 @@ export default function Game({ roomId }: Props) {
       id = generatePlayerId();
       window.localStorage.setItem(ID_KEY, id);
     }
-    const name = window.localStorage.getItem(NAME_KEY);
-    if (!name) {
-      setMissingName(true);
+    const current = getCurrentProfile();
+    if (!current) {
+      setMissingProfile(true);
       return;
     }
-    setMe({ id, name });
+    setMe({ id, name: current.name, profileId: current.id });
+    setProfile(current);
   }, []);
 
   // Keep movesRef in sync for handlers
@@ -146,6 +158,7 @@ export default function Game({ roomId }: Props) {
       setRestartRequest(null);
       setChanceUsed(false);
       setHint(null);
+      recordedKeyRef.current = null;
     });
 
     channel.on("broadcast", { event: "close" }, ({ payload }) => {
@@ -192,6 +205,28 @@ export default function Game({ roomId }: Props) {
       channelRef.current = null;
     };
   }, [me, roomId]);
+
+  // Record win/loss/draw to current profile (once per game)
+  useEffect(() => {
+    if (status.kind !== "ended") return;
+    if (!me || !profile) return;
+    const myStoneNow: Stone | null = (() => {
+      const idx = players.findIndex((p) => p.playerId === me.id);
+      if (idx === 0) return "black";
+      if (idx === 1) return "white";
+      return null;
+    })();
+    if (myStoneNow === null) return; // spectator: no record
+    const key = `${moves.length}:${status.reason}:${status.reason === "win" ? status.winner : ""}`;
+    if (recordedKeyRef.current === key) return;
+    recordedKeyRef.current = key;
+    let result: "win" | "loss" | "draw";
+    if (status.reason === "draw") result = "draw";
+    else if (status.winner === myStoneNow) result = "win";
+    else result = "loss";
+    const updated = recordResult(profile.id, result);
+    if (updated) setProfile(updated);
+  }, [status, me, profile, players, moves.length]);
 
   // Update status based on game state
   useEffect(() => {
@@ -287,6 +322,7 @@ export default function Game({ roomId }: Props) {
     setRestartRequest(null);
     setChanceUsed(false);
     setHint(null);
+    recordedKeyRef.current = null;
   };
 
   const handleCopy = async () => {
@@ -299,13 +335,13 @@ export default function Game({ roomId }: Props) {
     }
   };
 
-  if (missingName) {
+  if (missingProfile) {
     return (
       <main style={pageStyle}>
         <div style={cardStyle}>
-          <h1 style={{ fontSize: 24, marginBottom: 12 }}>닉네임이 필요합니다</h1>
+          <h1 style={{ fontSize: 24, marginBottom: 12 }}>사용자 등록이 필요해요</h1>
           <p style={{ color: "#a0a0a0", marginBottom: 16 }}>
-            먼저 로비에서 닉네임을 입력해주세요.
+            로비에서 이름을 먼저 등록해주세요.
           </p>
           <button
             onClick={() => router.push("/")}
@@ -381,6 +417,7 @@ export default function Game({ roomId }: Props) {
             name={me.name}
             stone={myStone}
             active={myTurn}
+            sub={profile ? formatRecord(profile) : null}
           />
           <PlayerCard
             label={
@@ -393,6 +430,7 @@ export default function Game({ roomId }: Props) {
               myStone === "black" ? "white" : myStone === "white" ? "black" : null
             }
             active={!myTurn && status.kind === "playing" && opponent !== null}
+            sub={null}
           />
         </div>
 
@@ -486,11 +524,13 @@ function PlayerCard({
   name,
   stone,
   active,
+  sub,
 }: {
   label: string;
   name: string;
   stone: Stone | null;
   active: boolean;
+  sub: string | null;
 }) {
   return (
     <div
@@ -531,6 +571,20 @@ function PlayerCard({
         >
           {name}
         </div>
+        {sub && (
+          <div
+            style={{
+              fontSize: 11,
+              color: "#a0a0a0",
+              marginTop: 2,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {sub}
+          </div>
+        )}
       </div>
     </div>
   );
