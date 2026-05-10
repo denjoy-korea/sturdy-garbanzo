@@ -1,5 +1,7 @@
 "use client";
 
+import { getSupabase } from "./supabase";
+
 export interface Profile {
   id: string;
   name: string;
@@ -9,9 +11,20 @@ export interface Profile {
   createdAt: number;
 }
 
+export interface CloudProfile {
+  id: string;
+  name: string;
+  wins: number;
+  losses: number;
+  draws: number;
+  created_at: string;
+  updated_at: string;
+}
+
 const PROFILES_KEY = "omok:profiles";
 const CURRENT_KEY = "omok:currentProfileId";
 const LEGACY_NAME_KEY = "omok:name";
+const TABLE = "omok_profiles";
 
 function generateId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -80,6 +93,8 @@ export function createProfile(name: string): Profile {
   profiles.push(profile);
   writeProfiles(profiles);
   setCurrentProfileId(profile.id);
+  // fire-and-forget cloud sync
+  pushProfileToCloud(profile).catch(() => {});
   return profile;
 }
 
@@ -94,6 +109,8 @@ export function deleteProfile(id: string) {
       window.localStorage.removeItem(CURRENT_KEY);
     }
   }
+  // fire-and-forget cloud delete
+  deleteProfileFromCloud(id).catch(() => {});
 }
 
 export function recordResult(
@@ -109,6 +126,8 @@ export function recordResult(
   else updated.draws += 1;
   profiles[idx] = updated;
   writeProfiles(profiles);
+  // fire-and-forget cloud sync
+  pushProfileToCloud(updated).catch(() => {});
   return updated;
 }
 
@@ -123,9 +142,58 @@ export function bootstrapProfiles(): Profile | null {
       return created;
     }
   }
+  // Push all local profiles to cloud once at startup (idempotent upsert)
+  syncAllLocalToCloud().catch(() => {});
   return getCurrentProfile();
 }
 
 export function formatRecord(p: Profile): string {
   return `${p.wins}승 ${p.losses}패${p.draws ? ` ${p.draws}무` : ""}`;
+}
+
+// ─── Cloud sync ──────────────────────────────────────────────────────────
+
+export async function pushProfileToCloud(p: Profile): Promise<void> {
+  const sb = getSupabase();
+  await sb.from(TABLE).upsert(
+    {
+      id: p.id,
+      name: p.name,
+      wins: p.wins,
+      losses: p.losses,
+      draws: p.draws,
+      created_at: new Date(p.createdAt).toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "id" },
+  );
+}
+
+export async function deleteProfileFromCloud(id: string): Promise<void> {
+  const sb = getSupabase();
+  await sb.from(TABLE).delete().eq("id", id);
+}
+
+export async function fetchCloudProfiles(): Promise<CloudProfile[]> {
+  const sb = getSupabase();
+  const { data, error } = await sb.from(TABLE).select("*");
+  if (error || !data) return [];
+  return data as CloudProfile[];
+}
+
+async function syncAllLocalToCloud(): Promise<void> {
+  const profiles = readProfiles();
+  if (profiles.length === 0) return;
+  await Promise.allSettled(profiles.map((p) => pushProfileToCloud(p)));
+}
+
+export function cloudToProfile(c: CloudProfile): Profile {
+  return {
+    id: c.id,
+    name: c.name,
+    wins: c.wins,
+    losses: c.losses,
+    draws: c.draws,
+    createdAt: new Date(c.created_at).getTime(),
+  };
 }

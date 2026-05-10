@@ -11,8 +11,11 @@ import {
 } from "@/lib/omok";
 import {
   bootstrapProfiles,
+  cloudToProfile,
+  type CloudProfile,
   createProfile,
   deleteProfile,
+  fetchCloudProfiles,
   formatRecord,
   getProfiles,
   type Profile,
@@ -33,12 +36,39 @@ export default function Lobby() {
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [lobbyConnected, setLobbyConnected] = useState(false);
 
+  const [cloudProfiles, setCloudProfiles] = useState<CloudProfile[]>([]);
+
   // Initial profile load + migration from legacy "omok:name"
   useEffect(() => {
     const profile = bootstrapProfiles();
     setCurrent(profile);
     setProfiles(getProfiles());
     setHydrated(true);
+  }, []);
+
+  // Cloud ranking: fetch + realtime subscribe
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => {
+      fetchCloudProfiles().then((rows) => {
+        if (alive) setCloudProfiles(rows);
+      });
+    };
+    refresh();
+    const supabase = getSupabase();
+    const ch = supabase
+      .channel("omok_profiles_changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "omok_profiles" },
+        () => refresh(),
+      )
+      .subscribe();
+    return () => {
+      alive = false;
+      ch.unsubscribe();
+      supabase.removeChannel(ch);
+    };
   }, []);
 
   // Subscribe to global lobby presence to discover active rooms
@@ -264,7 +294,11 @@ export default function Lobby() {
               )}
             </div>
 
-            <Ranking profiles={profiles} currentId={current.id} />
+            <Ranking
+              cloudProfiles={cloudProfiles}
+              localIds={profiles.map((p) => p.id)}
+              currentId={current.id}
+            />
 
             <InstallPrompt />
           </>
@@ -729,29 +763,36 @@ function ProfilePicker({
 }
 
 function Ranking({
-  profiles,
+  cloudProfiles,
+  localIds,
   currentId,
 }: {
-  profiles: Profile[];
+  cloudProfiles: CloudProfile[];
+  localIds: string[];
   currentId: string;
 }) {
   const ranked = useMemo(() => {
-    const total = (p: Profile) => p.wins + p.losses + p.draws;
-    const winRate = (p: Profile) => {
+    const localSet = new Set(localIds);
+    const total = (p: CloudProfile) => p.wins + p.losses + p.draws;
+    const winRate = (p: CloudProfile) => {
       const t = total(p);
       return t === 0 ? -1 : p.wins / t;
     };
-    return [...profiles]
-      .map((p) => ({ ...p, total: total(p), rate: winRate(p) }))
+    return cloudProfiles
+      .map((p) => ({
+        profile: cloudToProfile(p),
+        total: total(p),
+        rate: winRate(p),
+        isLocal: localSet.has(p.id),
+      }))
       .sort((a, b) => {
-        if (b.wins !== a.wins) return b.wins - a.wins;
+        if (b.profile.wins !== a.profile.wins)
+          return b.profile.wins - a.profile.wins;
         if (b.rate !== a.rate) return b.rate - a.rate;
         if (b.total !== a.total) return b.total - a.total;
-        return a.createdAt - b.createdAt;
+        return a.profile.createdAt - b.profile.createdAt;
       });
-  }, [profiles]);
-
-  if (ranked.length === 0) return null;
+  }, [cloudProfiles, localIds]);
 
   return (
     <div style={cardStyle}>
@@ -760,21 +801,35 @@ function Ranking({
           🏆 랭킹
         </h2>
         <span style={{ fontSize: 11, color: "#7a83a8", letterSpacing: 1 }}>
-          {ranked.length}명 · 이 기기 기준
+          {ranked.length}명 · 전체 공용
         </span>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {ranked.map((p, idx) => (
-          <RankingRow
-            key={p.id}
-            rank={idx + 1}
-            profile={p}
-            total={p.total}
-            rate={p.rate}
-            isMe={p.id === currentId}
-          />
-        ))}
-      </div>
+      {ranked.length === 0 ? (
+        <p
+          style={{
+            fontSize: 13,
+            color: "#7a83a8",
+            padding: "12px 4px",
+            textAlign: "center",
+            letterSpacing: 1,
+          }}
+        >
+          아직 등록된 사용자가 없어요.
+        </p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {ranked.map((r, idx) => (
+            <RankingRow
+              key={r.profile.id}
+              rank={idx + 1}
+              profile={r.profile}
+              total={r.total}
+              rate={r.rate}
+              isMe={r.profile.id === currentId}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
