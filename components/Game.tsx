@@ -23,9 +23,27 @@ import {
   type Profile,
   recordResult,
 } from "@/lib/profile";
+import {
+  isMuted,
+  playClick,
+  playDraw,
+  playHint,
+  playLose,
+  playStone,
+  playWin,
+  setMuted,
+} from "@/lib/sound";
 import BoardView from "./Board";
+import Fireworks from "./Fireworks";
 
 const ID_KEY = "omok:playerId";
+
+function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
 
 type PresenceMeta = {
   playerId: string;
@@ -62,11 +80,28 @@ export default function Game({ roomId }: Props) {
   const [players, setPlayers] = useState<PresenceMeta[]>([]);
   const [status, setStatus] = useState<Status>({ kind: "connecting" });
   const [restartRequest, setRestartRequest] = useState<string | null>(null);
+  const [undoRequest, setUndoRequest] = useState<string | null>(null);
   const [chanceUsed, setChanceUsed] = useState(false);
   const [hint, setHint] = useState<{ row: number; col: number } | null>(null);
+  const [muted, setMutedState] = useState(false);
+  const [gameStartAt, setGameStartAt] = useState<number | null>(null);
+  const [now, setNow] = useState<number>(Date.now());
+  const [showFireworks, setShowFireworks] = useState(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const movesRef = useRef<Move[]>([]);
   const recordedKeyRef = useRef<string | null>(null);
+
+  // Initialize muted state from localStorage
+  useEffect(() => {
+    setMutedState(isMuted());
+  }, []);
+
+  // Tick clock every second while playing
+  useEffect(() => {
+    if (gameStartAt === null) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [gameStartAt]);
 
   // Load identity from localStorage
   useEffect(() => {
@@ -126,6 +161,7 @@ export default function Game({ roomId }: Props) {
       if (board[move.row]?.[move.col] !== null) return;
       const next = [...current, { row: move.row, col: move.col, stone: move.stone }];
       setMoves(next);
+      playStone(move.stone);
     });
 
     channel.on("broadcast", { event: "request_state" }, ({ payload }) => {
@@ -162,6 +198,7 @@ export default function Game({ roomId }: Props) {
       setRestartRequest(null);
       setChanceUsed(false);
       setHint(null);
+      setGameStartAt(null);
       recordedKeyRef.current = null;
     });
 
@@ -169,6 +206,26 @@ export default function Game({ roomId }: Props) {
       const { reason } = (payload ?? {}) as { reason?: string };
       window.alert(reason || "방이 삭제되었습니다.");
       router.push("/");
+    });
+
+    channel.on("broadcast", { event: "undo_request" }, ({ payload }) => {
+      const { from } = (payload ?? {}) as { from?: string };
+      if (!from || from === me.id) return;
+      setUndoRequest(from);
+    });
+
+    channel.on("broadcast", { event: "undo_decline" }, ({ payload }) => {
+      const { from } = (payload ?? {}) as { from?: string };
+      if (!from || from === me.id) return;
+      setUndoRequest(null);
+      window.alert("상대가 수 무르기를 거절했습니다.");
+    });
+
+    channel.on("broadcast", { event: "undo_confirm" }, () => {
+      setMoves((prev) => (prev.length > 0 ? prev.slice(0, -1) : prev));
+      setUndoRequest(null);
+      setHint(null);
+      // status will re-derive automatically
     });
 
     channel.on("broadcast", { event: "forfeit" }, ({ payload }) => {
@@ -245,7 +302,27 @@ export default function Game({ roomId }: Props) {
     else result = "loss";
     const updated = recordResult(profile.id, result);
     if (updated) setProfile(updated);
+    if (result === "win") {
+      playWin();
+      setShowFireworks(true);
+    } else if (result === "loss") {
+      playLose();
+    } else {
+      playDraw();
+    }
   }, [status, me, profile, players, moves.length]);
+
+  // Auto-stop fireworks after a short while
+  useEffect(() => {
+    if (!showFireworks) return;
+    const t = setTimeout(() => setShowFireworks(false), 5500);
+    return () => clearTimeout(t);
+  }, [showFireworks]);
+
+  // Reset fireworks when a new game starts
+  useEffect(() => {
+    if (status.kind === "playing") setShowFireworks(false);
+  }, [status.kind]);
 
   // Update status based on game state
   useEffect(() => {
@@ -264,7 +341,8 @@ export default function Game({ roomId }: Props) {
     } else if (isBoardFull(board)) {
       setStatus({ kind: "ended", reason: "draw" });
     } else {
-      setStatus({ kind: "playing" });
+      setStatus((prev) => (prev.kind === "playing" ? prev : { kind: "playing" }));
+      setGameStartAt((prev) => prev ?? Date.now());
     }
   }, [moves, players, me]);
 
@@ -333,6 +411,7 @@ export default function Game({ roomId }: Props) {
     const move: Move = { row, col, stone: myStone };
     setMoves((prev) => [...prev, move]);
     setHint(null);
+    playStone(myStone);
     channel.send({
       type: "broadcast",
       event: "move",
@@ -346,7 +425,51 @@ export default function Game({ roomId }: Props) {
     if (suggestion) {
       setHint(suggestion);
       setChanceUsed(true);
+      playHint();
     }
+  };
+
+  const handleUndoRequest = () => {
+    const channel = channelRef.current;
+    if (!channel || !me) return;
+    if (moves.length === 0) return;
+    channel.send({
+      type: "broadcast",
+      event: "undo_request",
+      payload: { from: me.id },
+    });
+    setUndoRequest(me.id);
+  };
+
+  const handleAcceptUndo = () => {
+    const channel = channelRef.current;
+    if (!channel) return;
+    channel.send({
+      type: "broadcast",
+      event: "undo_confirm",
+      payload: {},
+    });
+    setMoves((prev) => (prev.length > 0 ? prev.slice(0, -1) : prev));
+    setUndoRequest(null);
+    setHint(null);
+  };
+
+  const handleDeclineUndo = () => {
+    const channel = channelRef.current;
+    if (!channel || !me) return;
+    channel.send({
+      type: "broadcast",
+      event: "undo_decline",
+      payload: { from: me.id },
+    });
+    setUndoRequest(null);
+  };
+
+  const toggleMute = () => {
+    const next = !muted;
+    setMuted(next);
+    setMutedState(next);
+    if (!next) playClick();
   };
 
   const handleRestart = () => {
@@ -373,6 +496,7 @@ export default function Game({ roomId }: Props) {
     setRestartRequest(null);
     setChanceUsed(false);
     setHint(null);
+    setGameStartAt(null);
     recordedKeyRef.current = null;
   };
 
@@ -407,6 +531,7 @@ export default function Game({ roomId }: Props) {
 
   return (
     <main style={pageStyle}>
+      <Fireworks active={showFireworks} />
       <div style={{ width: "100%", maxWidth: 560, marginBottom: 16 }}>
         <div
           style={{
@@ -419,16 +544,18 @@ export default function Game({ roomId }: Props) {
           <button onClick={handleLeave} style={pixelBtnStyle}>
             ← 나가기
           </button>
-          <div
+          <button
+            onClick={toggleMute}
             style={{
-              fontSize: 13,
-              color: "#5ec5ff",
-              letterSpacing: 2,
-              textShadow: "0 0 6px rgba(94, 197, 255, 0.5)",
+              ...pixelBtnStyle,
+              padding: "8px 12px",
+              color: muted ? "#7a83a8" : "#5ec5ff",
             }}
+            aria-label={muted ? "소리 켜기" : "소리 끄기"}
+            title={muted ? "소리 켜기" : "소리 끄기"}
           >
-            ▶ PLAY
-          </div>
+            {muted ? "🔇 소리OFF" : "🔊 소리ON"}
+          </button>
         </div>
 
         <div
@@ -467,6 +594,35 @@ export default function Game({ roomId }: Props) {
           turnStone={turnStone}
           opponent={opponent}
         />
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginTop: 8,
+            padding: "0 4px",
+            fontSize: 11,
+            letterSpacing: 1,
+            color: "#7a83a8",
+          }}
+        >
+          <span>
+            수 <span style={{ color: "#e8e8e8", fontWeight: 700 }}>{moves.length}</span>
+          </span>
+          <span>
+            시간{" "}
+            <span style={{ color: "#5ec5ff", fontWeight: 700 }}>
+              {formatElapsed(
+                gameStartAt && status.kind !== "ended"
+                  ? now - gameStartAt
+                  : gameStartAt
+                  ? Math.max(0, now - gameStartAt)
+                  : 0,
+              )}
+            </span>
+          </span>
+        </div>
       </div>
 
       <BoardView
@@ -481,7 +637,16 @@ export default function Game({ roomId }: Props) {
       />
 
       {myStone !== null && status.kind === "playing" && (
-        <div style={{ marginTop: 18, textAlign: "center" }}>
+        <div
+          style={{
+            marginTop: 18,
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 10,
+            justifyContent: "center",
+            alignItems: "stretch",
+          }}
+        >
           <button
             onClick={handleChance}
             disabled={chanceUsed || !myTurn}
@@ -518,21 +683,136 @@ export default function Game({ roomId }: Props) {
                 : "다음 수 추천"
             }
           >
-            ★ {chanceUsed ? "찬스 사용 완료" : "찬스 (1회) — 다음 수 추천"}
+            ★ {chanceUsed ? "찬스 사용 완료" : "찬스 (1회)"}
           </button>
-          {hint && (
-            <p
-              style={{
-                marginTop: 10,
-                fontSize: 12,
-                color: "#ffd83d",
-                letterSpacing: 1,
-              }}
-            >
-              ▶ 추천: {hint.row + 1}행 {hint.col + 1}열 (노란 점선)
-            </p>
-          )}
+
+          <button
+            onClick={handleUndoRequest}
+            disabled={moves.length === 0 || undoRequest !== null}
+            style={{
+              padding: "10px 18px",
+              borderRadius: 4,
+              fontWeight: 700,
+              fontSize: 13,
+              letterSpacing: 1,
+              background:
+                moves.length === 0 || undoRequest !== null
+                  ? "#161a2c"
+                  : "#5ec5ff",
+              color:
+                moves.length === 0 || undoRequest !== null
+                  ? "#5a607a"
+                  : "#0a0d18",
+              border: `2px solid ${
+                moves.length === 0 || undoRequest !== null
+                  ? "#2e3550"
+                  : "#0a0d18"
+              }`,
+              boxShadow:
+                moves.length === 0 || undoRequest !== null
+                  ? "3px 3px 0 #050710"
+                  : "4px 4px 0 #050710",
+              cursor:
+                moves.length === 0 || undoRequest !== null
+                  ? "not-allowed"
+                  : "pointer",
+            }}
+            title={
+              moves.length === 0
+                ? "무를 수가 없습니다"
+                : undoRequest !== null
+                ? "응답 대기 중입니다"
+                : "직전 수를 무릅니다"
+            }
+          >
+            ↶ 수 무르기
+          </button>
         </div>
+      )}
+
+      {myStone !== null &&
+        status.kind === "playing" &&
+        undoRequest !== null && (
+          <div
+            style={{
+              marginTop: 14,
+              padding: "12px 14px",
+              background: "#0e1226",
+              border: "2px solid #5ec5ff",
+              borderRadius: 4,
+              boxShadow: "3px 3px 0 #050710",
+              textAlign: "center",
+              maxWidth: 360,
+            }}
+          >
+            {undoRequest === me.id ? (
+              <p
+                style={{
+                  color: "#7a83a8",
+                  letterSpacing: 1,
+                  animation: "blink 1.1s steps(2) infinite",
+                }}
+              >
+                ··· 무르기 응답 대기 중 ···
+              </p>
+            ) : (
+              <>
+                <p
+                  style={{
+                    marginBottom: 10,
+                    color: "#5ec5ff",
+                    letterSpacing: 1,
+                    fontWeight: 700,
+                  }}
+                >
+                  ↶ 상대가 수 무르기를 요청했습니다
+                </p>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    justifyContent: "center",
+                  }}
+                >
+                  <button
+                    onClick={handleAcceptUndo}
+                    style={{
+                      ...pixelBtnStyle,
+                      background: "#4ade80",
+                      color: "#0a0d18",
+                      borderColor: "#0a0d18",
+                    }}
+                  >
+                    수락
+                  </button>
+                  <button
+                    onClick={handleDeclineUndo}
+                    style={{
+                      ...pixelBtnStyle,
+                      background: "#ff5277",
+                      color: "#0a0d18",
+                      borderColor: "#0a0d18",
+                    }}
+                  >
+                    거절
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+      {hint && status.kind === "playing" && (
+        <p
+          style={{
+            marginTop: 10,
+            fontSize: 12,
+            color: "#ffd83d",
+            letterSpacing: 1,
+          }}
+        >
+          ▶ 추천: {hint.row + 1}행 {hint.col + 1}열 (노란 점선)
+        </p>
       )}
 
       {status.kind === "ended" && (
