@@ -33,8 +33,10 @@ export default function BoardView({
         display: "inline-block",
         background: "#dcb16a",
         padding: 18,
-        borderRadius: 8,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+        borderRadius: 4,
+        border: "4px solid #050710",
+        boxShadow:
+          "0 0 0 2px #4a5170, 6px 6px 0 #050710, 0 0 24px rgba(255,216,61,0.08)",
       }}
     >
       <div

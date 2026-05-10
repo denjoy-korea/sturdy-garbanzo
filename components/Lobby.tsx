@@ -18,6 +18,7 @@ import {
   type Profile,
   setCurrentProfileId,
 } from "@/lib/profile";
+import InstallPrompt from "./InstallPrompt";
 
 export default function Lobby() {
   const router = useRouter();
@@ -262,6 +263,8 @@ export default function Lobby() {
                 </div>
               )}
             </div>
+
+            <InstallPrompt />
           </>
         )}
       </div>
@@ -412,8 +415,8 @@ function ProfileCard({
       style={{
         ...cardStyle,
         background:
-          "linear-gradient(135deg, #2c2620 0%, #1f1a14 100%)",
-        border: "1px solid #3a342d",
+          "linear-gradient(135deg, #1a2040 0%, #0f1326 100%)",
+        border: "2px solid #4a5170",
       }}
     >
       <div
@@ -425,16 +428,25 @@ function ProfileCard({
         }}
       >
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 12, color: "#a0a0a0", marginBottom: 4 }}>
-            안녕하세요 👋
+          <div
+            style={{
+              fontSize: 11,
+              color: "#5ec5ff",
+              marginBottom: 4,
+              letterSpacing: 1,
+            }}
+          >
+            ▶ PLAYER
           </div>
           <div
             style={{
               fontSize: 22,
               fontWeight: 700,
+              color: "#ffd83d",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
+              textShadow: "0 0 10px rgba(255, 216, 61, 0.3)",
             }}
           >
             {profile.name}
@@ -444,13 +456,16 @@ function ProfileCard({
           onClick={onChange}
           style={{
             padding: "8px 14px",
-            borderRadius: 8,
-            background: "#3a342d",
-            color: "#f0d8a8",
+            borderRadius: 4,
+            background: "#0a0d1c",
+            color: "#5ec5ff",
             fontSize: 13,
-            fontWeight: 600,
+            fontWeight: 700,
             cursor: "pointer",
             flexShrink: 0,
+            border: "2px solid #4a5170",
+            boxShadow: "3px 3px 0 #050710",
+            letterSpacing: 1,
           }}
         >
           변경 →
@@ -462,7 +477,7 @@ function ProfileCard({
           gap: 12,
           marginTop: 14,
           paddingTop: 14,
-          borderTop: "1px dashed #3a342d",
+          borderTop: "1px dashed #4a5170",
         }}
       >
         <Stat label="승" value={profile.wins} color="#22c55e" />
@@ -489,10 +504,26 @@ function Stat({
 }) {
   return (
     <div style={{ flex: 1, textAlign: "center" }}>
-      <div style={{ fontSize: 11, color: "#a0a0a0", marginBottom: 2 }}>
+      <div
+        style={{
+          fontSize: 10,
+          color: "#7a83a8",
+          marginBottom: 2,
+          letterSpacing: 1,
+        }}
+      >
         {label}
       </div>
-      <div style={{ fontSize: 18, fontWeight: 700, color }}>{value}</div>
+      <div
+        style={{
+          fontSize: 20,
+          fontWeight: 700,
+          color,
+          fontFeatureSettings: "tnum",
+        }}
+      >
+        {value}
+      </div>
     </div>
   );
 }
@@ -537,11 +568,11 @@ function ProfilePicker({
         style={{
           width: "100%",
           maxWidth: 420,
-          background: "#1f1a14",
-          border: "1px solid #3a342d",
-          borderRadius: 16,
+          background: "#0e1226",
+          border: "2px solid #4a5170",
+          borderRadius: 4,
           padding: 20,
-          boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+          boxShadow: "6px 6px 0 #050710",
           maxHeight: "85vh",
           overflowY: "auto",
         }}
@@ -583,19 +614,20 @@ function ProfilePicker({
                   alignItems: "center",
                   gap: 10,
                   padding: "10px 12px",
-                  borderRadius: 10,
-                  background: selected ? "#2d2a1f" : "#1a1610",
-                  border: `1px solid ${selected ? "#c8954c" : "#2a251e"}`,
+                  borderRadius: 4,
+                  background: selected ? "#1a2040" : "#161a2c",
+                  border: `2px solid ${selected ? "#ffd83d" : "#2e3550"}`,
                   cursor: "pointer",
+                  boxShadow: selected ? "3px 3px 0 #050710" : undefined,
                 }}
               >
                 <div
                   style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: "50%",
-                    border: `2px solid ${selected ? "#c8954c" : "#3a342d"}`,
-                    background: selected ? "#c8954c" : "transparent",
+                    width: 22,
+                    height: 22,
+                    borderRadius: 4,
+                    border: `2px solid ${selected ? "#ffd83d" : "#4a5170"}`,
+                    background: selected ? "#ffd83d" : "transparent",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -633,12 +665,13 @@ function ProfilePicker({
                   style={{
                     width: 28,
                     height: 28,
-                    borderRadius: 6,
-                    background: "#2a251e",
-                    color: "#f87171",
+                    borderRadius: 4,
+                    background: "#0a0d1c",
+                    color: "#ff5277",
                     fontSize: 16,
                     cursor: "pointer",
                     flexShrink: 0,
+                    border: "2px solid #2e3550",
                   }}
                 >
                   ×
@@ -673,11 +706,14 @@ function ProfilePicker({
               onClick={onAdd}
               style={{
                 padding: "0 18px",
-                borderRadius: 8,
-                background: "#c8954c",
+                borderRadius: 4,
+                background: "#ffd83d",
                 color: "#1a1a1a",
-                fontWeight: 700,
+                fontWeight: 800,
                 cursor: "pointer",
+                border: "2px solid #1a1a1a",
+                boxShadow: "3px 3px 0 #050710",
+                letterSpacing: 1,
               }}
             >
               추가
@@ -720,9 +756,9 @@ function RoomItem({
     <div
       onClick={onClick}
       style={{
-        background: "#1a1610",
-        border: "1px solid #2a251e",
-        borderRadius: 10,
+        background: "#0e1226",
+        border: "2px solid #2e3550",
+        borderRadius: 4,
         padding: "12px 14px",
         display: "flex",
         alignItems: "center",
@@ -732,20 +768,19 @@ function RoomItem({
         transition: "background 0.15s",
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = "#23201a";
+        e.currentTarget.style.background = "#1a2040";
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.background = "#1a1610";
+        e.currentTarget.style.background = "#0e1226";
       }}
     >
       <div style={{ minWidth: 0, flex: 1 }}>
         <div
           style={{
-            fontFamily: "monospace",
             fontSize: 16,
             letterSpacing: 2,
             fontWeight: 700,
-            color: "#f0d8a8",
+            color: "#ffd83d",
           }}
         >
           {room.roomId}
@@ -774,8 +809,9 @@ function RoomItem({
         <span
           style={{
             fontSize: 12,
-            color: full ? "#a0a0a0" : "#22c55e",
+            color: full ? "#7a83a8" : "#4ade80",
             fontWeight: 700,
+            letterSpacing: 1,
           }}
         >
           {full ? "관전" : "입장 →"}
@@ -790,23 +826,24 @@ function RoomItem({
           style={{
             width: 28,
             height: 28,
-            borderRadius: 6,
-            background: "#2a251e",
-            color: "#f87171",
+            borderRadius: 4,
+            background: "#0a0d1c",
+            color: "#ff5277",
             fontSize: 16,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             cursor: "pointer",
             flexShrink: 0,
+            border: "2px solid #2e3550",
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.background = "#7f1d1d";
             e.currentTarget.style.color = "#fff";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = "#2a251e";
-            e.currentTarget.style.color = "#f87171";
+            e.currentTarget.style.background = "#0a0d1c";
+            e.currentTarget.style.color = "#ff5277";
           }}
         >
           ×
@@ -821,8 +858,6 @@ const pageStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "center",
   padding: "32px 16px 48px",
-  background:
-    "radial-gradient(ellipse at top, #2a1f15 0%, #14100c 60%, #0a0805 100%)",
 };
 
 const containerStyle: React.CSSProperties = {
@@ -834,11 +869,11 @@ const containerStyle: React.CSSProperties = {
 };
 
 const cardStyle: React.CSSProperties = {
-  background: "#262320",
-  border: "1px solid #34302a",
-  borderRadius: 16,
+  background: "#161a2c",
+  border: "2px solid #2e3550",
+  borderRadius: 4,
   padding: 20,
-  boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+  boxShadow: "4px 4px 0 #050710",
 };
 
 const roomsHeaderStyle: React.CSSProperties = {
@@ -852,9 +887,9 @@ const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "12px 14px",
   fontSize: 16,
-  background: "#1a1610",
-  border: "1px solid #34302a",
-  borderRadius: 8,
+  background: "#0a0d1c",
+  border: "2px solid #2e3550",
+  borderRadius: 4,
   color: "#f0f0f0",
   outline: "none",
 };
@@ -862,20 +897,23 @@ const inputStyle: React.CSSProperties = {
 const primaryActionStyle: React.CSSProperties = {
   width: "100%",
   padding: "16px 18px",
-  fontSize: 17,
-  fontWeight: 700,
-  borderRadius: 12,
-  background: "linear-gradient(135deg, #e07b3e 0%, #c8954c 100%)",
+  fontSize: 16,
+  fontWeight: 800,
+  letterSpacing: 1,
+  borderRadius: 4,
+  background: "#ffd83d",
   color: "#1a1a1a",
+  border: "2px solid #1a1a1a",
   cursor: "pointer",
-  boxShadow: "0 6px 20px rgba(224, 123, 62, 0.3)",
+  boxShadow: "5px 5px 0 #050710",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
 };
 
 const errorStyle: React.CSSProperties = {
-  color: "#f87171",
+  color: "#ff5277",
   marginTop: 10,
   fontSize: 13,
+  letterSpacing: 1,
 };

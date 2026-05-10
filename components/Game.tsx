@@ -56,7 +56,6 @@ export default function Game({ roomId }: Props) {
   const [moves, setMoves] = useState<Move[]>([]);
   const [players, setPlayers] = useState<PresenceMeta[]>([]);
   const [status, setStatus] = useState<Status>({ kind: "connecting" });
-  const [copied, setCopied] = useState(false);
   const [restartRequest, setRestartRequest] = useState<string | null>(null);
   const [chanceUsed, setChanceUsed] = useState(false);
   const [hint, setHint] = useState<{ row: number; col: number } | null>(null);
@@ -325,16 +324,6 @@ export default function Game({ roomId }: Props) {
     recordedKeyRef.current = null;
   };
 
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(roomId);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // ignore
-    }
-  };
-
   if (missingProfile) {
     return (
       <main style={pageStyle}>
@@ -375,33 +364,19 @@ export default function Game({ roomId }: Props) {
             marginBottom: 12,
           }}
         >
-          <button
-            onClick={() => router.push("/")}
-            style={{
-              padding: "6px 12px",
-              borderRadius: 6,
-              background: "#333",
-              color: "#ddd",
-              fontSize: 14,
-            }}
-          >
+          <button onClick={() => router.push("/")} style={pixelBtnStyle}>
             ← 나가기
           </button>
-          <button
-            onClick={handleCopy}
+          <div
             style={{
-              padding: "6px 12px",
-              borderRadius: 6,
-              background: "#333",
-              color: "#ddd",
-              fontSize: 14,
-              fontFamily: "monospace",
+              fontSize: 13,
+              color: "#5ec5ff",
               letterSpacing: 2,
+              textShadow: "0 0 6px rgba(94, 197, 255, 0.5)",
             }}
-            title="방 코드 복사"
           >
-            방 {roomId} {copied ? "✓ 복사됨" : "📋"}
-          </button>
+            ▶ PLAY
+          </div>
         </div>
 
         <div
@@ -454,21 +429,33 @@ export default function Game({ roomId }: Props) {
       />
 
       {myStone !== null && status.kind === "playing" && (
-        <div style={{ marginTop: 16 }}>
+        <div style={{ marginTop: 18, textAlign: "center" }}>
           <button
             onClick={handleChance}
             disabled={chanceUsed || !myTurn}
             style={{
               padding: "10px 18px",
-              borderRadius: 8,
-              fontWeight: 600,
-              fontSize: 14,
+              borderRadius: 4,
+              fontWeight: 700,
+              fontSize: 13,
+              letterSpacing: 1,
               background: chanceUsed
-                ? "#333"
+                ? "#161a2c"
                 : myTurn
-                ? "#fbbf24"
-                : "#333",
-              color: chanceUsed || !myTurn ? "#888" : "#1a1a1a",
+                ? "#ffd83d"
+                : "#161a2c",
+              color: chanceUsed
+                ? "#5a607a"
+                : myTurn
+                ? "#1a1a1a"
+                : "#5a607a",
+              border: `2px solid ${
+                chanceUsed ? "#2e3550" : myTurn ? "#1a1a1a" : "#2e3550"
+              }`,
+              boxShadow:
+                chanceUsed || !myTurn
+                  ? "3px 3px 0 #050710"
+                  : "4px 4px 0 #050710",
               cursor: chanceUsed || !myTurn ? "not-allowed" : "pointer",
             }}
             title={
@@ -476,41 +463,75 @@ export default function Game({ roomId }: Props) {
                 ? "이번 판에 찬스를 이미 사용했습니다"
                 : !myTurn
                 ? "내 차례에만 사용 가능합니다"
-                : "AI가 추천하는 다음 수를 표시합니다"
+                : "다음 수 추천"
             }
           >
-            ✨ {chanceUsed ? "찬스 사용함" : "찬스 (1회) — 다음 수 추천"}
+            ★ {chanceUsed ? "찬스 사용 완료" : "찬스 (1회) — 다음 수 추천"}
           </button>
           {hint && (
-            <p style={{ marginTop: 8, fontSize: 12, color: "#fbbf24" }}>
-              추천 위치: {hint.row + 1}행 {hint.col + 1}열 (노란 점선)
+            <p
+              style={{
+                marginTop: 10,
+                fontSize: 12,
+                color: "#ffd83d",
+                letterSpacing: 1,
+              }}
+            >
+              ▶ 추천: {hint.row + 1}행 {hint.col + 1}열 (노란 점선)
             </p>
           )}
         </div>
       )}
 
       {status.kind === "ended" && (
-        <div style={{ marginTop: 20, textAlign: "center" }}>
+        <div style={{ marginTop: 24, textAlign: "center" }}>
           {restartRequest && restartRequest !== me.id ? (
             <div>
-              <p style={{ marginBottom: 8 }}>
-                상대가 다시 두기를 요청했습니다.
+              <p
+                style={{
+                  marginBottom: 10,
+                  color: "#ffd83d",
+                  letterSpacing: 1,
+                }}
+              >
+                ▶ 상대가 다시 두기를 요청했습니다
               </p>
               <button
                 onClick={handleAcceptRestart}
-                style={{ ...btnStyle, background: "#22c55e", color: "#fff" }}
+                style={{
+                  ...pixelBtnStyle,
+                  background: "#4ade80",
+                  color: "#0a0d18",
+                  borderColor: "#0a0d18",
+                  fontSize: 14,
+                  padding: "10px 18px",
+                }}
               >
                 수락하고 다시 두기
               </button>
             </div>
           ) : restartRequest === me.id ? (
-            <p style={{ color: "#a0a0a0" }}>상대 응답 대기 중...</p>
+            <p
+              style={{
+                color: "#7a83a8",
+                animation: "blink 1.1s steps(2) infinite",
+              }}
+            >
+              ··· 상대 응답 대기 중 ···
+            </p>
           ) : myStone !== null ? (
             <button
               onClick={handleRestart}
-              style={{ ...btnStyle, background: "#3b82f6", color: "#fff" }}
+              style={{
+                ...pixelBtnStyle,
+                background: "#5ec5ff",
+                color: "#0a0d18",
+                borderColor: "#0a0d18",
+                fontSize: 14,
+                padding: "10px 18px",
+              }}
             >
-              다시 두기 요청
+              ▶ 다시 두기 요청
             </button>
           ) : null}
         </div>
@@ -535,35 +556,50 @@ function PlayerCard({
   return (
     <div
       style={{
-        background: active ? "#1e3a5f" : "#262626",
-        border: active ? "1px solid #3b82f6" : "1px solid #333",
-        borderRadius: 10,
+        background: active ? "#2a2540" : "#161a2c",
+        border: active ? "2px solid #ffd83d" : "2px solid #2e3550",
+        borderRadius: 4,
         padding: "10px 12px",
         display: "flex",
         alignItems: "center",
         gap: 10,
+        boxShadow: active
+          ? "0 0 14px rgba(255,216,61,0.35), 3px 3px 0 #050710"
+          : "3px 3px 0 #050710",
       }}
     >
       <div
         style={{
-          width: 24,
-          height: 24,
+          width: 26,
+          height: 26,
           borderRadius: "50%",
           background:
             stone === "black"
               ? "radial-gradient(circle at 30% 30%, #555, #000)"
               : stone === "white"
               ? "radial-gradient(circle at 30% 30%, #fff, #bbb)"
-              : "#444",
+              : "#2e3550",
           flexShrink: 0,
+          boxShadow:
+            stone !== null ? "0 0 0 2px #050710" : "inset 0 0 0 2px #4a5170",
         }}
       />
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 11, color: "#a0a0a0" }}>{label}</div>
+        <div
+          style={{
+            fontSize: 11,
+            color: active ? "#ffd83d" : "#7a83a8",
+            letterSpacing: 1,
+            textTransform: "uppercase",
+          }}
+        >
+          {label}
+        </div>
         <div
           style={{
             fontSize: 14,
-            fontWeight: 600,
+            fontWeight: 700,
+            color: "#f0f0f0",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -574,12 +610,13 @@ function PlayerCard({
         {sub && (
           <div
             style={{
-              fontSize: 11,
-              color: "#a0a0a0",
+              fontSize: 10,
+              color: "#7a83a8",
               marginTop: 2,
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
+              letterSpacing: 1,
             }}
           >
             {sub}
@@ -602,48 +639,55 @@ function StatusBanner({
   opponent: PresenceMeta | null;
 }) {
   let text = "";
-  let color = "#a0a0a0";
+  let color = "#7a83a8";
+  let blink = false;
 
   if (status.kind === "connecting") {
-    text = "연결 중...";
+    text = "▶ 연결중...";
   } else if (status.kind === "waiting") {
     text = opponent
-      ? "잠시만 기다려주세요..."
-      : "방 코드를 친구에게 공유하세요. 상대를 기다리는 중...";
+      ? "▶ 잠시만 기다려주세요"
+      : "▶ 가족이 들어올 때까지 대기중";
+    blink = true;
   } else if (status.kind === "playing") {
     if (myStone === null) {
-      text = `관전 중 — ${turnStone === "black" ? "흑" : "백"}의 차례`;
+      text = `관전중 — ${turnStone === "black" ? "흑" : "백"} 차례`;
     } else if (myStone === turnStone) {
-      text = "내 차례입니다";
-      color = "#3b82f6";
+      text = "★ 내 차례 ★";
+      color = "#ffd83d";
+      blink = true;
     } else {
-      text = "상대 차례입니다";
+      text = "··· 상대 차례 ···";
+      color = "#5ec5ff";
     }
   } else if (status.kind === "ended") {
     if (status.reason === "draw") {
-      text = "무승부입니다.";
+      text = "DRAW · 무승부";
     } else if (status.winner === myStone) {
-      text = "🎉 승리했습니다!";
-      color = "#22c55e";
+      text = "♛ WIN · 승리 ♛";
+      color = "#4ade80";
     } else if (myStone === null) {
       text = `${status.winner === "black" ? "흑" : "백"} 승리`;
     } else {
-      text = "패배했습니다.";
-      color = "#f87171";
+      text = "GAME OVER · 패배";
+      color = "#ff5277";
     }
   }
 
   return (
     <div
       style={{
-        background: "#1a1a1a",
-        border: "1px solid #333",
-        borderRadius: 8,
+        background: "#0e1226",
+        border: `2px solid ${color}`,
+        borderRadius: 4,
         padding: "10px 14px",
         fontSize: 14,
         color,
         textAlign: "center",
-        fontWeight: 600,
+        fontWeight: 700,
+        letterSpacing: 1,
+        boxShadow: "3px 3px 0 #050710",
+        animation: blink ? "blink 1.1s steps(2) infinite" : undefined,
       }}
     >
       {text}
@@ -660,15 +704,31 @@ const pageStyle: React.CSSProperties = {
 };
 
 const cardStyle: React.CSSProperties = {
-  background: "#262626",
-  borderRadius: 12,
+  background: "#161a2c",
+  border: "2px solid #2e3550",
+  borderRadius: 4,
   padding: 24,
   maxWidth: 360,
   width: "100%",
+  boxShadow: "4px 4px 0 #050710",
 };
 
 const btnStyle: React.CSSProperties = {
   padding: "10px 20px",
-  borderRadius: 8,
-  fontWeight: 600,
+  borderRadius: 4,
+  fontWeight: 700,
+  letterSpacing: 1,
+};
+
+const pixelBtnStyle: React.CSSProperties = {
+  padding: "8px 14px",
+  borderRadius: 4,
+  background: "#161a2c",
+  color: "#e8e8e8",
+  border: "2px solid #4a5170",
+  fontSize: 13,
+  fontWeight: 700,
+  letterSpacing: 1,
+  boxShadow: "3px 3px 0 #050710",
+  cursor: "pointer",
 };
