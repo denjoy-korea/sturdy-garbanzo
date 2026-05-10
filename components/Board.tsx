@@ -6,6 +6,7 @@ interface Props {
   board: Board;
   lastMove: { row: number; col: number } | null;
   winningLine: Array<[number, number]> | null;
+  hint: { row: number; col: number } | null;
   myStone: Stone | null;
   myTurn: boolean;
   disabled: boolean;
@@ -16,6 +17,7 @@ export default function BoardView({
   board,
   lastMove,
   winningLine,
+  hint,
   myStone,
   myTurn,
   disabled,
@@ -110,6 +112,31 @@ export default function BoardView({
             );
           }),
         )}
+        {/* hint marker */}
+        {hint && board[hint.row]?.[hint.col] === null && (
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              left: hint.col * CELL - STONE / 2,
+              top: hint.row * CELL - STONE / 2,
+              width: STONE,
+              height: STONE,
+              borderRadius: "50%",
+              border: "3px dashed #fbbf24",
+              boxShadow: "0 0 12px rgba(251, 191, 36, 0.7)",
+              animation: "omokHintPulse 1.2s ease-in-out infinite",
+              pointerEvents: "none",
+              zIndex: 4,
+            }}
+          />
+        )}
+        <style>{`
+          @keyframes omokHintPulse {
+            0%, 100% { transform: scale(1); opacity: 0.85; }
+            50% { transform: scale(1.15); opacity: 1; }
+          }
+        `}</style>
         {/* stones */}
         {board.map((row, r) =>
           row.map((cell, c) => {

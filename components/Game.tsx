@@ -16,6 +16,7 @@ import {
   type Stone,
   type WinResult,
 } from "@/lib/omok";
+import { suggestMove } from "@/lib/hint";
 import BoardView from "./Board";
 
 const NAME_KEY = "omok:name";
@@ -47,6 +48,8 @@ export default function Game({ roomId }: Props) {
   const [status, setStatus] = useState<Status>({ kind: "connecting" });
   const [copied, setCopied] = useState(false);
   const [restartRequest, setRestartRequest] = useState<string | null>(null);
+  const [chanceUsed, setChanceUsed] = useState(false);
+  const [hint, setHint] = useState<{ row: number; col: number } | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const movesRef = useRef<Move[]>([]);
 
@@ -141,6 +144,8 @@ export default function Game({ roomId }: Props) {
       setMoves([]);
       setStatus({ kind: "playing" });
       setRestartRequest(null);
+      setChanceUsed(false);
+      setHint(null);
     });
 
     channel.subscribe(async (state) => {
@@ -235,11 +240,21 @@ export default function Game({ roomId }: Props) {
     if (!channel) return;
     const move: Move = { row, col, stone: myStone };
     setMoves((prev) => [...prev, move]);
+    setHint(null);
     channel.send({
       type: "broadcast",
       event: "move",
       payload: { ...move, senderId: me.id },
     });
+  };
+
+  const handleChance = () => {
+    if (chanceUsed || !myStone || !myTurn) return;
+    const suggestion = suggestMove(moves, myStone);
+    if (suggestion) {
+      setHint(suggestion);
+      setChanceUsed(true);
+    }
   };
 
   const handleRestart = () => {
@@ -264,6 +279,8 @@ export default function Game({ roomId }: Props) {
     setMoves([]);
     setStatus({ kind: "playing" });
     setRestartRequest(null);
+    setChanceUsed(false);
+    setHint(null);
   };
 
   const handleCopy = async () => {
@@ -385,11 +402,48 @@ export default function Game({ roomId }: Props) {
         board={board}
         lastMove={lastMove}
         winningLine={winningLine}
+        hint={hint}
         myStone={myStone}
         myTurn={myTurn}
         disabled={status.kind !== "playing"}
         onPlace={handlePlace}
       />
+
+      {myStone !== null && status.kind === "playing" && (
+        <div style={{ marginTop: 16 }}>
+          <button
+            onClick={handleChance}
+            disabled={chanceUsed || !myTurn}
+            style={{
+              padding: "10px 18px",
+              borderRadius: 8,
+              fontWeight: 600,
+              fontSize: 14,
+              background: chanceUsed
+                ? "#333"
+                : myTurn
+                ? "#fbbf24"
+                : "#333",
+              color: chanceUsed || !myTurn ? "#888" : "#1a1a1a",
+              cursor: chanceUsed || !myTurn ? "not-allowed" : "pointer",
+            }}
+            title={
+              chanceUsed
+                ? "이번 판에 찬스를 이미 사용했습니다"
+                : !myTurn
+                ? "내 차례에만 사용 가능합니다"
+                : "AI가 추천하는 다음 수를 표시합니다"
+            }
+          >
+            ✨ {chanceUsed ? "찬스 사용함" : "찬스 (1회) — 다음 수 추천"}
+          </button>
+          {hint && (
+            <p style={{ marginTop: 8, fontSize: 12, color: "#fbbf24" }}>
+              추천 위치: {hint.row + 1}행 {hint.col + 1}열 (노란 점선)
+            </p>
+          )}
+        </div>
+      )}
 
       {status.kind === "ended" && (
         <div style={{ marginTop: 20, textAlign: "center" }}>
