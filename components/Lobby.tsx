@@ -173,9 +173,9 @@ export default function Lobby() {
             marginBottom: 16,
           }}
         >
-          <h1 style={{ fontSize: 32, marginBottom: 8 }}>오목</h1>
+          <h1 style={{ fontSize: 32, marginBottom: 8 }}>뽀꼬오목</h1>
           <p style={{ color: "#a0a0a0", marginBottom: 24 }}>
-            친구와 1:1로 즐기는 온라인 오목
+            가족과 1:1로 즐기는 온라인 뽀꼬오목
           </p>
 
           <label style={{ display: "block", marginBottom: 16 }}>
