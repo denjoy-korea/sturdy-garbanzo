@@ -105,6 +105,41 @@ export default function Lobby() {
     router.push(`/play/${roomId}`);
   };
 
+  const handleDeleteRoom = async (roomId: string) => {
+    const ok = window.confirm(
+      `방 ${roomId} 을(를) 삭제할까요?\n진행중인 게임이 즉시 종료되고 모든 참가자가 로비로 돌아갑니다.`,
+    );
+    if (!ok) return;
+    const supabase = getSupabase();
+    const ch = supabase.channel(`omok:${roomId}`);
+    await new Promise<void>((resolve) => {
+      let done = false;
+      ch.subscribe((status) => {
+        if (done) return;
+        if (status === "SUBSCRIBED") {
+          done = true;
+          resolve();
+        }
+      });
+      setTimeout(() => {
+        if (!done) {
+          done = true;
+          resolve();
+        }
+      }, 2000);
+    });
+    await ch.send({
+      type: "broadcast",
+      event: "close",
+      payload: { reason: "방이 삭제되었습니다." },
+    });
+    // Brief delay to ensure delivery before unsubscribing
+    setTimeout(() => {
+      ch.unsubscribe();
+      supabase.removeChannel(ch);
+    }, 300);
+  };
+
   const waitingRooms = useMemo(
     () => rooms.filter((r) => r.playerCount < 2),
     [rooms],
@@ -219,6 +254,7 @@ export default function Lobby() {
                   key={r.roomId}
                   room={r}
                   onClick={() => handleJoinRoom(r.roomId)}
+                  onDelete={() => handleDeleteRoom(r.roomId)}
                 />
               ))}
               {playingRooms.length > 0 && (
@@ -229,6 +265,7 @@ export default function Lobby() {
                   key={r.roomId}
                   room={r}
                   onClick={() => handleJoinRoom(r.roomId)}
+                  onDelete={() => handleDeleteRoom(r.roomId)}
                 />
               ))}
             </div>
@@ -258,20 +295,21 @@ function SectionLabel({ text }: { text: string }) {
 function RoomItem({
   room,
   onClick,
+  onDelete,
 }: {
   room: RoomSummary;
   onClick: () => void;
+  onDelete: () => void;
 }) {
   const full = room.playerCount >= 2;
   return (
-    <button
+    <div
       onClick={onClick}
       style={{
         background: "#1a1a1a",
         border: "1px solid #333",
         borderRadius: 10,
         padding: "12px 14px",
-        textAlign: "left",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
@@ -312,15 +350,55 @@ function RoomItem({
       </div>
       <div
         style={{
-          fontSize: 12,
-          color: full ? "#a0a0a0" : "#22c55e",
-          fontWeight: 600,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
           flexShrink: 0,
         }}
       >
-        {full ? "관전" : "입장 →"}
+        <span
+          style={{
+            fontSize: 12,
+            color: full ? "#a0a0a0" : "#22c55e",
+            fontWeight: 600,
+          }}
+        >
+          {full ? "관전" : "입장 →"}
+        </span>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          aria-label={`방 ${room.roomId} 삭제`}
+          title="이 방 삭제"
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 6,
+            background: "#333",
+            color: "#f87171",
+            fontSize: 16,
+            lineHeight: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#7f1d1d";
+            e.currentTarget.style.color = "#fff";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "#333";
+            e.currentTarget.style.color = "#f87171";
+          }}
+        >
+          ×
+        </button>
       </div>
-    </button>
+    </div>
   );
 }
 

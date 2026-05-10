@@ -148,6 +148,12 @@ export default function Game({ roomId }: Props) {
       setHint(null);
     });
 
+    channel.on("broadcast", { event: "close" }, ({ payload }) => {
+      const { reason } = (payload ?? {}) as { reason?: string };
+      window.alert(reason || "방이 삭제되었습니다.");
+      router.push("/");
+    });
+
     channel.subscribe(async (state) => {
       if (state !== "SUBSCRIBED") return;
       await channel.track({
