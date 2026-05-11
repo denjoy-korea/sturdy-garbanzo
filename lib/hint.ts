@@ -2,6 +2,7 @@ import {
   applyMoves,
   BOARD_SIZE,
   type Board,
+  checkForbidden,
   type Move,
   type Stone,
 } from "./omok";
@@ -139,6 +140,12 @@ export function suggestMove(
     for (let c = 0; c < BOARD_SIZE; c++) {
       if (board[r][c] !== null) continue;
       if (!hasNearbyStone(board, r, c)) continue;
+
+      // 흑의 경우 금수 위치는 추천하지 않음 (단, 즉시 승리 가능한 위치는 예외)
+      if (myStone === "black") {
+        const forbidden = checkForbidden(board, r, c);
+        if (forbidden !== null) continue;
+      }
 
       const my = scoreCell(board, r, c, myStone);
       const opp = scoreCell(board, r, c, oppStone);

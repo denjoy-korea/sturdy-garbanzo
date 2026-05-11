@@ -6,8 +6,11 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabase";
 import {
   applyMoves,
+  checkForbidden,
   checkWin,
+  type ForbiddenReason,
   generatePlayerId,
+  getForbiddenCells,
   isBoardFull,
   LOBBY_CHANNEL,
   type LobbyPresence,
@@ -385,6 +388,13 @@ export default function Game({ roomId }: Props) {
   const turnStone = nextStone(moves);
   const myTurn = myStone !== null && myStone === turnStone && status.kind === "playing";
 
+  // 흑 차례일 때만 금수 목록 계산
+  const forbiddenCells = useMemo(() => {
+    if (status.kind !== "playing") return [];
+    if (turnStone !== "black") return [];
+    return getForbiddenCells(board);
+  }, [board, turnStone, status.kind]);
+
   const opponent = useMemo(() => {
     if (!me) return null;
     return players.find((p) => p.playerId !== me.id) ?? null;
@@ -426,6 +436,11 @@ export default function Game({ roomId }: Props) {
     if (!me || !myStone || !myTurn) return;
     const channel = channelRef.current;
     if (!channel) return;
+    // 흑의 금수 위치는 착수 불가
+    if (myStone === "black") {
+      const reason = checkForbidden(board, row, col);
+      if (reason !== null) return;
+    }
     const move: Move = { row, col, stone: myStone };
     setMoves((prev) => [...prev, move]);
     setHint(null);
@@ -627,11 +642,27 @@ export default function Game({ roomId }: Props) {
         lastMove={lastMove}
         winningLine={winningLine}
         hint={hint}
+        forbiddenCells={myStone === "black" && myTurn ? forbiddenCells : []}
         myStone={myStone}
         myTurn={myTurn}
         disabled={status.kind !== "playing"}
         onPlace={handlePlace}
       />
+
+      {/* 금수 안내 배너 (흑 차례이고 금수가 1개 이상 있을 때) */}
+      {myStone === "black" && myTurn && forbiddenCells.length > 0 && (
+        <p
+          style={{
+            marginTop: 8,
+            fontSize: 11,
+            color: "#ef4444",
+            letterSpacing: 1,
+            textAlign: "center",
+          }}
+        >
+          ✕ 빨간 X 표시는 금수(착수 불가) 위치입니다
+        </p>
+      )}
 
       {myStone !== null && status.kind === "playing" && (
         <div

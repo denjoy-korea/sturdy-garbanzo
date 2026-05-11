@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BOARD_SIZE, type Board, type Stone } from "@/lib/omok";
+import { BOARD_SIZE, type Board, type ForbiddenReason, type Stone } from "@/lib/omok";
 
 interface Props {
   board: Board;
   lastMove: { row: number; col: number } | null;
   winningLine: Array<[number, number]> | null;
   hint: { row: number; col: number } | null;
+  /** 금수 위치 목록 (흑 차례일 때만 전달) */
+  forbiddenCells?: Array<{ row: number; col: number; reason: ForbiddenReason }>;
   myStone: Stone | null;
   myTurn: boolean;
   disabled: boolean;
@@ -34,6 +36,7 @@ export default function BoardView({
   lastMove,
   winningLine,
   hint,
+  forbiddenCells,
   myStone,
   myTurn,
   disabled,
@@ -57,6 +60,12 @@ export default function BoardView({
   const winSet = new Set(
     (winningLine ?? []).map(([r, c]) => `${r},${c}`),
   );
+
+  // 금수 위치를 빠르게 조회하기 위한 Map
+  const forbiddenMap = new Map<string, ForbiddenReason>();
+  for (const f of forbiddenCells ?? []) {
+    forbiddenMap.set(`${f.row},${f.col}`, f.reason);
+  }
 
   const COLS = "ABCDEFGHIJKLMNO";
   const lastKey = lastMove ? `${lastMove.row},${lastMove.col}` : null;
@@ -193,11 +202,13 @@ export default function BoardView({
           {board.map((row, r) =>
             row.map((boardCell, c) => {
               const empty = boardCell === null;
-              const canPlaceHere = canPlaceAnywhere && empty;
+              const isForbidden = forbiddenMap.has(`${r},${c}`);
+              // 금수 위치는 클릭 불가 (흑 차례에만)
+              const canPlaceHere = canPlaceAnywhere && empty && !isForbidden;
               return (
                 <button
                   key={`${r}-${c}`}
-                  aria-label={`${COLS[c]}${r + 1}`}
+                  aria-label={`${COLS[c]}${r + 1}${isForbidden ? " (금수)" : ""}`}
                   onClick={() => canPlaceHere && onPlace(r, c)}
                   onMouseEnter={() =>
                     canPlaceHere && setHover({ row: r, col: c })
@@ -227,6 +238,7 @@ export default function BoardView({
           {hover &&
             myStone &&
             board[hover.row][hover.col] === null &&
+            !forbiddenMap.has(`${hover.row},${hover.col}`) &&
             canPlaceAnywhere && (
               <div
                 aria-hidden
@@ -266,6 +278,56 @@ export default function BoardView({
               }}
             />
           )}
+          {/* ─── 금수 마커 (흑 차례에만 표시) ─────────────────────────────── */}
+          {(forbiddenCells ?? []).map(({ row: r, col: c, reason }) => {
+            if (board[r][c] !== null) return null;
+            return (
+              <div
+                key={`forbidden-${r}-${c}`}
+                aria-hidden
+                title={
+                  reason === "overline"
+                    ? "장목 금수 (6목 이상)"
+                    : reason === "double-four"
+                    ? "4-4 금수"
+                    : "3-3 금수"
+                }
+                style={{
+                  position: "absolute",
+                  left: c * cell - stone / 2,
+                  top: r * cell - stone / 2,
+                  width: stone,
+                  height: stone,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  pointerEvents: "none",
+                  zIndex: 3,
+                }}
+              >
+                {/* X 마커 */}
+                <svg
+                  viewBox="0 0 24 24"
+                  width={Math.max(10, stone * 0.6)}
+                  height={Math.max(10, stone * 0.6)}
+                  style={{ display: "block" }}
+                >
+                  <line
+                    x1="4" y1="4" x2="20" y2="20"
+                    stroke="#ef4444"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                  />
+                  <line
+                    x1="20" y1="4" x2="4" y2="20"
+                    stroke="#ef4444"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </div>
+            );
+          })}
           <style>{`
             @keyframes omokHintPulse {
               0%, 100% { transform: scale(1); opacity: 0.85; }
